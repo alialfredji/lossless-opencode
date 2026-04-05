@@ -16,6 +16,7 @@
     "typescript": "^5.9.2"
   },
   "dependencies": {
+    "ai": "^6.0.146",
     "js-tiktoken": "^1.0.21",
     "zod": "^4.3.6"
   }

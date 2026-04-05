@@ -14,13 +14,22 @@ import type {
 
 export function mockConfig(overrides?: Partial<LcmConfig>): LcmConfig {
   return {
+    dataDir: ".lcm",
+    maxContextTokens: 120000,
     softTokenThreshold: 100000,
     hardTokenThreshold: 150000,
     freshTailSize: 64,
     maxLeafSummaryTokens: 1200,
     maxCondensedSummaryTokens: 2000,
+    leafSummaryBudget: 1200,
+    condensedSummaryBudget: 2000,
+    maxSummaryDepth: 5,
     summaryMaxOverageFactor: 3,
     compactionBatchSize: 10,
+    aggressiveThreshold: 3,
+    model: "anthropic:claude-sonnet-4-20250514",
+    enableIntegrity: true,
+    enableFts: true,
     largeFileThreshold: 25000,
     dbPath: ":memory:",
     summarizeAfterMessages: 20,

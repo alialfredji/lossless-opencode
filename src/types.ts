@@ -1,13 +1,22 @@
 import { z } from "zod";
 
 export interface LcmConfig {
+  dataDir: string;
+  maxContextTokens: number;
   softTokenThreshold: number;
   hardTokenThreshold: number;
   freshTailSize: number;
   maxLeafSummaryTokens: number;
   maxCondensedSummaryTokens: number;
+  leafSummaryBudget: number;
+  condensedSummaryBudget: number;
+  maxSummaryDepth: number;
   summaryMaxOverageFactor: number;
   compactionBatchSize: number;
+  aggressiveThreshold: number;
+  model: string;
+  enableIntegrity: boolean;
+  enableFts: boolean;
   largeFileThreshold: number;
   dbPath: string;
   summarizeAfterMessages: number;
@@ -98,14 +107,23 @@ export interface RetrievalResult {
 }
 
 export const DEFAULT_CONFIG: LcmConfig = {
+  dataDir: ".lcm",
+  maxContextTokens: 120000,
   softTokenThreshold: 100000,
   hardTokenThreshold: 150000,
   freshTailSize: 64,
   maxLeafSummaryTokens: 1200,
   maxCondensedSummaryTokens: 2000,
+  leafSummaryBudget: 1200,
+  condensedSummaryBudget: 2000,
+  maxSummaryDepth: 5,
   summaryMaxOverageFactor: 3,
   compactionBatchSize: 10,
-  largeFileThreshold: 25000,
+  aggressiveThreshold: 3,
+  model: "anthropic:claude-sonnet-4-20250514",
+  enableIntegrity: true,
+  enableFts: true,
+  largeFileThreshold: 50000,
   dbPath: ".lcm/lcm.db",
   summarizeAfterMessages: 20,
   summarizeAfterTokens: 20000,
