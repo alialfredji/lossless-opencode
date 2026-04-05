@@ -1,0 +1,22 @@
+{
+  "name": "lossless-opencode",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@opencode-ai/plugin": "^1.3.2"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "^1.3.2",
+    "@types/node": "^24.10.1",
+    "bun-types": "^1.3.11",
+    "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "js-tiktoken": "^1.0.21",
+    "zod": "^4.3.6"
+  }
+}
