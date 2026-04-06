@@ -83,6 +83,20 @@ export interface LargeFile {
   messageId: string | null;
 }
 
+export interface IntegrityCheck {
+  name: string;
+  status: "pass" | "fail" | "warn";
+  message: string;
+  details?: string;
+}
+
+export interface IntegrityReport {
+  checks: IntegrityCheck[];
+  passed: number;
+  failed: number;
+  warnings: number;
+}
+
 export interface IntegrityCheckResult {
   check: string;
   passed: boolean;
