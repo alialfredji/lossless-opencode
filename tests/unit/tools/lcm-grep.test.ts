@@ -87,6 +87,7 @@ describe("createGrepToolDefinition", () => {
       sessionId: null,
       db: null,
       config: { ...DEFAULT_CONFIG },
+      isCompacting: false,
     };
     const def = createGrepToolDefinition(state);
     const result = await def.execute({ query: "test" }, {} as never);
@@ -99,6 +100,7 @@ describe("createGrepToolDefinition", () => {
       sessionId: null,
       db,
       config: { ...DEFAULT_CONFIG },
+      isCompacting: false,
     };
     const def = createGrepToolDefinition(state);
     const result = await def.execute({ query: "test" }, {} as never);
@@ -113,6 +115,7 @@ describe("createGrepToolDefinition", () => {
       sessionId: CONVERSATION_ID,
       db,
       config: { ...DEFAULT_CONFIG },
+      isCompacting: false,
     };
     const def = createGrepToolDefinition(state);
     const result = await def.execute({ query: "TypeScript" }, {} as never);

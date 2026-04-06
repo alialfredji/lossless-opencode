@@ -4,6 +4,7 @@ import { tool } from "@opencode-ai/plugin";
 import { createDatabase } from "./db/database";
 import { runMigrations } from "./db/migrations";
 import { persistMessage } from "./messages/persistence";
+import { runPipeline } from "./pipeline";
 import { DEFAULT_CONFIG, type LcmConfig, type LcmMessage } from "./types";
 import { countTokens } from "./utils/tokens";
 import { resolve } from "path";
@@ -12,6 +13,7 @@ export interface HookSessionState {
   sessionId: string | null;
   db: Database | null;
   config: LcmConfig;
+  isCompacting: boolean;
 }
 
 type ChatMessageHook = NonNullable<Hooks["chat.message"]>;
@@ -42,6 +44,7 @@ export function createSessionState(config?: Partial<LcmConfig>): HookSessionStat
       ...DEFAULT_CONFIG,
       ...config,
     },
+    isCompacting: false,
   };
 }
 
@@ -138,12 +141,12 @@ export function createChatMessageHandler(state: HookSessionState, directory: str
   };
 }
 
-export function createMessagesTransformHandler() {
+export function createMessagesTransformHandler(state: HookSessionState) {
   return async (
     _input: {},
-    _output: ChatTransformOutput,
+    output: ChatTransformOutput,
   ): Promise<void> => {
-    return;
+    output.messages = await runPipeline(state, output.messages);
   };
 }
 
@@ -175,7 +178,7 @@ const plugin: Plugin = async (ctx: PluginInput) => {
 
   return {
     "chat.message": createChatMessageHandler(state, ctx.directory),
-    "experimental.chat.messages.transform": createMessagesTransformHandler(),
+    "experimental.chat.messages.transform": createMessagesTransformHandler(state),
     "experimental.session.compacting": createSessionCompactingHandler(),
     tool: createToolHooks(),
     config: createConfigHandler(),

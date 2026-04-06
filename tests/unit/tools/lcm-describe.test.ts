@@ -156,6 +156,7 @@ describe("createDescribeToolDefinition", () => {
       sessionId: null,
       db: null,
       config: { ...DEFAULT_CONFIG },
+      isCompacting: false,
     };
     const def = createDescribeToolDefinition(state);
     const result = await def.execute({}, {} as never);
@@ -168,6 +169,7 @@ describe("createDescribeToolDefinition", () => {
       sessionId: null,
       db,
       config: { ...DEFAULT_CONFIG },
+      isCompacting: false,
     };
     const def = createDescribeToolDefinition(state);
     const result = await def.execute({}, {} as never);
@@ -182,6 +184,7 @@ describe("createDescribeToolDefinition", () => {
       sessionId: CONVERSATION_ID,
       db,
       config: { ...DEFAULT_CONFIG },
+      isCompacting: false,
     };
     const def = createDescribeToolDefinition(state);
     const result = await def.execute({}, {} as never);
