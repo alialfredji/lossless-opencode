@@ -1,6 +1,6 @@
 {
   "name": "lossless-opencode",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Lossless Context Management plugin for OpenCode — hierarchical DAG-based summarization with BM25 retrieval",
   "license": "MIT",
   "author": "Ali Alfred Ji",

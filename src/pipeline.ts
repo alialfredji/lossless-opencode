@@ -300,14 +300,15 @@ export async function runPipeline(
         continue;
       }
 
-      await wrapAsync(
-        async () => {
-          persistMessage(state.db!, state.sessionId!, lcmMessage);
-        },
-        undefined,
+      const persisted = await wrapAsync(
+        async () => persistMessage(state.db!, state.sessionId!, lcmMessage),
+        false,
         "pipeline:persistNewMessages",
       );
-      newlyPersistedMessages.push(lcmMessage);
+
+      if (persisted) {
+        newlyPersistedMessages.push(lcmMessage);
+      }
 
       await wrapAsync(
         async () => {

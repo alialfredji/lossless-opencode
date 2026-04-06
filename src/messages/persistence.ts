@@ -104,7 +104,7 @@ export function persistMessage(
   db: Database,
   conversationId: string,
   message: LcmMessage,
-): void {
+): boolean {
   const seqRow = db
     .prepare<SequenceRow, [string]>(
       "SELECT MAX(sequence_number) AS max_seq FROM messages WHERE conversation_id = ?",
@@ -115,8 +115,8 @@ export function persistMessage(
   const parts = decomposeMessageParts(message.content);
   const concatenatedContent = buildConcatenatedContent(parts);
 
-  db.prepare(
-    `INSERT INTO messages (id, conversation_id, role, content, token_count, sequence_number, created_at)
+  const result = db.prepare(
+    `INSERT OR IGNORE INTO messages (id, conversation_id, role, content, token_count, sequence_number, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     message.id,
@@ -128,6 +128,10 @@ export function persistMessage(
     message.timestamp,
   );
 
+  if (result.changes === 0) {
+    return false;
+  }
+
   const insertPart = db.prepare(
     `INSERT INTO message_parts (id, message_id, part_type, content, sequence_number)
      VALUES (?, ?, ?, ?, ?)`,
@@ -136,6 +140,8 @@ export function persistMessage(
   for (const [index, part] of parts.entries()) {
     insertPart.run(crypto.randomUUID(), message.id, part.type, part.content, index + 1);
   }
+
+  return true;
 }
 
 export function persistMessages(
