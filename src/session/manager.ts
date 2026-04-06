@@ -99,6 +99,9 @@ export function resetSession(db: Database, sessionId: string): ResetResult {
     ).run(sessionId, sessionId);
     db.query("DELETE FROM summaries WHERE conversation_id = ?").run(sessionId);
     db.query("DELETE FROM large_files WHERE conversation_id = ?").run(sessionId);
+    db.query(
+      "DELETE FROM message_parts WHERE message_id IN (SELECT id FROM messages WHERE conversation_id = ?)",
+    ).run(sessionId);
     db.query("DELETE FROM messages WHERE conversation_id = ?").run(sessionId);
     db.query("DELETE FROM context_items WHERE conversation_id = ?").run(sessionId);
     db.query("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')").run();

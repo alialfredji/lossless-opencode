@@ -1,7 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { tool } from "@opencode-ai/plugin";
 import { z } from "zod";
-import { searchMessages, searchSummaries } from "../search/indexer";
+import { searchAll } from "../search/indexer";
 import type { HookSessionState } from "../types";
 
 const DEFAULT_LIMIT = 10;
@@ -15,6 +15,12 @@ interface MessageMeta {
 interface SummaryMeta {
   depth: number;
   createdAt: string;
+  minSequence: number | null;
+  maxSequence: number | null;
+}
+
+interface CountRow {
+  count: number;
 }
 
 function getMessageMeta(db: Database, messageId: string): MessageMeta | null {
@@ -34,16 +40,57 @@ function getMessageMeta(db: Database, messageId: string): MessageMeta | null {
 
 function getSummaryMeta(db: Database, summaryId: string): SummaryMeta | null {
   const row = db
-    .prepare<{ depth: number; created_at: string }, [string]>(
-      `SELECT depth, created_at FROM summaries WHERE id = ?`,
+    .prepare<
+      {
+        depth: number;
+        created_at: string;
+        min_sequence: number | null;
+        max_sequence: number | null;
+      },
+      [string, string]
+    >(
+      `WITH RECURSIVE descendants(id) AS (
+         SELECT ?
+         UNION ALL
+         SELECT sp.child_id
+         FROM summary_parents sp
+         JOIN descendants d ON sp.parent_id = d.id
+       )
+       SELECT s.depth,
+              s.created_at,
+              MIN(m.sequence_number) AS min_sequence,
+              MAX(m.sequence_number) AS max_sequence
+       FROM summaries s
+       LEFT JOIN descendants d ON d.id IS NOT NULL
+       LEFT JOIN summary_messages sm ON sm.summary_id = d.id
+       LEFT JOIN messages m ON m.id = sm.message_id
+       WHERE s.id = ?
+       GROUP BY s.id, s.depth, s.created_at`,
     )
-    .get(summaryId);
+    .get(summaryId, summaryId);
 
   if (!row) return null;
   return {
     depth: row.depth,
     createdAt: row.created_at,
+    minSequence: row.min_sequence,
+    maxSequence: row.max_sequence,
   };
+}
+
+function getSearchLimit(db: Database, sessionId: string, type: "messages" | "summaries" | "all", limit: number): number {
+  if (type === "all") {
+    return limit;
+  }
+
+  const messagesCount =
+    db.query<CountRow, [string]>("SELECT COUNT(*) AS count FROM messages WHERE conversation_id = ?").get(sessionId)
+      ?.count ?? 0;
+  const summariesCount =
+    db.query<CountRow, [string]>("SELECT COUNT(*) AS count FROM summaries WHERE conversation_id = ?").get(sessionId)
+      ?.count ?? 0;
+
+  return Math.max(limit, messagesCount + summariesCount);
 }
 
 function formatTimestamp(isoString: string): string {
@@ -72,31 +119,36 @@ export function lcmGrep(
 
   const limit = opts?.limit ?? DEFAULT_LIMIT;
   const type = opts?.type ?? "all";
+  const searchLimit = getSearchLimit(db, sessionId, type, limit);
+  const results = searchAll(db, sessionId, query, { limit: searchLimit });
+  const filteredResults =
+    type === "all"
+      ? results
+      : results.filter((result) => (type === "messages" ? result.type === "message" : result.type === "summary"));
 
   const lines: string[] = [];
 
-  if (type === "messages" || type === "all") {
-    const msgResults = searchMessages(db, sessionId, query, { limit });
-    for (const r of msgResults) {
-      const meta = getMessageMeta(db, r.messageId);
+  for (const result of filteredResults.slice(0, limit)) {
+    if (result.type === "message") {
+      const meta = getMessageMeta(db, result.id);
       if (!meta) continue;
       const timestamp = formatTimestamp(meta.createdAt);
       lines.push(`[Message #${meta.sequenceNumber} | ${meta.role} | ${timestamp}]`);
-      lines.push(r.snippet);
+      lines.push(result.snippet);
       lines.push("");
+      continue;
     }
-  }
 
-  if (type === "summaries" || type === "all") {
-    const sumResults = searchSummaries(db, sessionId, query, { limit });
-    for (const r of sumResults) {
-      const meta = getSummaryMeta(db, r.summaryId);
-      if (!meta) continue;
-      const timestamp = formatTimestamp(meta.createdAt);
-      lines.push(`[Summary depth=${meta.depth} | ${timestamp}]`);
-      lines.push(r.snippet);
-      lines.push("");
-    }
+    const meta = getSummaryMeta(db, result.id);
+    if (!meta) continue;
+    const timestamp = formatTimestamp(meta.createdAt);
+    const coverage =
+      meta.minSequence !== null && meta.maxSequence !== null
+        ? `covers #${meta.minSequence}-${meta.maxSequence}`
+        : "covers #?-?";
+    lines.push(`[Summary depth=${meta.depth} | ${coverage} | ${timestamp}]`);
+    lines.push(result.snippet);
+    lines.push("");
   }
 
   while (lines.length > 0 && lines[lines.length - 1] === "") {

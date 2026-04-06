@@ -196,3 +196,19 @@ export function getMessagesForSummary(db: Database, summaryId: string): string[]
     .all(summaryId)
     .map((r) => r.message_id);
 }
+
+export function getChildSummaries(db: Database, summaryId: string): Summary[] {
+  const rows = db
+    .query<SummaryRow, [string]>(
+      `SELECT s.id, s.conversation_id, s.depth, s.content, s.token_count, s.created_at, s.compaction_level
+       FROM summaries s
+       JOIN summary_parents sp ON s.id = sp.child_id
+       WHERE sp.parent_id = ?
+       ORDER BY s.created_at ASC`,
+    )
+    .all(summaryId);
+
+  return rows.map((row) =>
+    rowToSummary(row, loadParentIds(db, row.id), loadMessageIds(db, row.id)),
+  );
+}

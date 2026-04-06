@@ -1,8 +1,11 @@
 import type { Database } from "bun:sqlite";
 import { tool } from "@opencode-ai/plugin";
+import { assembleContext } from "../context/assembler";
+import { formatContextAsMessages } from "../context/formatter";
 import { getMessageCount, getUnsummarizedMessages } from "../messages/persistence";
 import { determineCompactionLevel } from "../compaction/engine";
 import type { HookSessionState, LcmConfig } from "../types";
+import { countTokens } from "../utils/tokens";
 
 interface DepthCountRow {
   depth: number;
@@ -19,6 +22,10 @@ interface MaxDepthRow {
 
 interface IndexCountRow {
   count: number;
+}
+
+interface TimestampRow {
+  timestamp: string | null;
 }
 
 function getSummaryDepthCounts(
@@ -68,6 +75,51 @@ function getMessageIndexCount(db: Database, sessionId: string): number {
   return row?.count ?? 0;
 }
 
+function getActiveMessageCount(db: Database, sessionId: string): number {
+  const row = db
+    .query<IndexCountRow, [string]>(
+      `SELECT COUNT(*) AS count
+       FROM messages
+       WHERE conversation_id = ?
+         AND id NOT IN (SELECT message_id FROM summary_messages)`,
+    )
+    .get(sessionId);
+
+  return row?.count ?? 0;
+}
+
+function getLastCompactionTimestamp(db: Database, sessionId: string): string | null {
+  const row = db
+    .query<TimestampRow, [string]>(
+      `SELECT MAX(created_at) AS timestamp FROM summaries WHERE conversation_id = ?`,
+    )
+    .get(sessionId);
+
+  return row?.timestamp ?? null;
+}
+
+function getAssembledContextTokenTotal(
+  db: Database,
+  sessionId: string,
+  config: LcmConfig,
+  totalMessages: number,
+  totalSummaries: number,
+  dagDepth: number,
+): number {
+  const contextItems = assembleContext(db, config, sessionId);
+  const formattedMessages = formatContextAsMessages(contextItems, {
+    totalMessages,
+    summariesCount: totalSummaries,
+    dagDepth,
+    freshTailSize: contextItems.filter((item) => item.type === "message").length,
+  });
+
+  return formattedMessages.reduce(
+    (sum, message) => sum + countTokens(message.content),
+    0,
+  );
+}
+
 export function lcmDescribe(
   db: Database,
   sessionId: string,
@@ -76,6 +128,8 @@ export function lcmDescribe(
   const totalMessages = getMessageCount(db, sessionId);
   const unsummarizedMessages = getUnsummarizedMessages(db, sessionId);
   const unsummarizedCount = unsummarizedMessages.length;
+  const activeMessages = getActiveMessageCount(db, sessionId);
+  const condensedMessages = Math.max(0, totalMessages - activeMessages);
 
   const depthCounts = getSummaryDepthCounts(db, sessionId);
   const totalSummaries = depthCounts.reduce((sum, row) => sum + row.count, 0);
@@ -91,11 +145,22 @@ export function lcmDescribe(
 
   const compactionLevel = determineCompactionLevel(db, sessionId, config);
   const currentMaxDepth = getMaxSummaryDepth(db, sessionId);
+  const assembledContextTokens = getAssembledContextTokenTotal(
+    db,
+    sessionId,
+    config,
+    totalMessages,
+    totalSummaries,
+    currentMaxDepth,
+  );
+  const lastCompactionTimestamp = getLastCompactionTimestamp(db, sessionId);
 
   const lines: string[] = [];
   lines.push("=== LCM Session State ===");
   lines.push(`Session: ${sessionId}`);
   lines.push(`Total Messages: ${totalMessages}`);
+  lines.push(`Active Messages: ${activeMessages}`);
+  lines.push(`Condensed Messages: ${condensedMessages}`);
   lines.push(`Unsummarized (fresh tail): ${unsummarizedCount}`);
   lines.push("");
   lines.push("Summary DAG:");
@@ -115,6 +180,7 @@ export function lcmDescribe(
   lines.push("");
   lines.push("Context Budget:");
   lines.push(`  Max tokens: ${config.maxContextTokens}`);
+  lines.push(`  Assembled context: ${assembledContextTokens} tokens`);
   lines.push(`  Summaries: ${summaryTokens} tokens`);
   lines.push(`  Fresh tail: ${freshTailTokens} tokens`);
   lines.push("");
@@ -125,6 +191,7 @@ export function lcmDescribe(
   lines.push(
     `Compaction Level: ${compactionLevel} (depth ${currentMaxDepth} of max ${config.maxSummaryDepth})`,
   );
+  lines.push(`Last Compaction: ${lastCompactionTimestamp ?? "never"}`);
 
   return lines.join("\n");
 }

@@ -3,7 +3,7 @@ import { tool } from "@opencode-ai/plugin";
 import type { HookSessionState } from "../types";
 import { getMessages } from "../messages/persistence";
 import { searchAll } from "../search/indexer";
-import { getMessagesForSummary } from "../summaries/dag-store";
+import { getChildSummaries, getMessagesForSummary } from "../summaries/dag-store";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const APPROX_CHARS_PER_TOKEN = 4;
@@ -60,6 +60,18 @@ function getSummaryMessageRows(db: Database, messageIds: string[]): MessageRow[]
   return rows;
 }
 
+function appendSection(sections: string[], remainingChars: number, section: string): number {
+  const separatorLength = sections.length === 0 ? 0 : 2;
+  const cost = separatorLength + section.length;
+
+  if (cost > remainingChars) {
+    return remainingChars;
+  }
+
+  sections.push(section);
+  return remainingChars - cost;
+}
+
 function expandSummaryById(
   db: Database,
   summaryId: string,
@@ -73,6 +85,7 @@ function expandSummaryById(
 
   const messageIds = getMessagesForSummary(db, summaryId);
   const messageRows = getSummaryMessageRows(db, messageIds);
+  const childSummaries = getChildSummaries(db, summaryId);
 
   const minSeq = messageRows.length > 0 ? messageRows[0].sequence_number : 0;
   const maxSeq = messageRows.length > 0 ? messageRows[messageRows.length - 1].sequence_number : 0;
@@ -80,33 +93,41 @@ function expandSummaryById(
   const headerLine = `=== Expanded: Summary ${summary.id} (depth ${summary.depth}) ===`;
   const summaryBlock = `Summary text:\n${summary.content}`;
   const rangeBlock = `Covers messages: ${minSeq}-${maxSeq} (${messageRows.length} messages)`;
+  const sections: string[] = [];
+  let remainingChars = MAX_OUTPUT_CHARS;
 
-  if (format === "condensed") {
-    return [headerLine, summaryBlock, rangeBlock].join("\n\n");
+  remainingChars = appendSection(sections, remainingChars, headerLine);
+  remainingChars = appendSection(sections, remainingChars, summaryBlock);
+  remainingChars = appendSection(sections, remainingChars, rangeBlock);
+
+  for (const childSummary of childSummaries) {
+    const childBlock = `### Child Summary (depth=${childSummary.depth}, id=${childSummary.id})\n${childSummary.content}`;
+    remainingChars = appendSection(sections, remainingChars, childBlock);
   }
 
-  if (messageRows.length === 0) {
-    return [headerLine, summaryBlock, rangeBlock].join("\n\n");
+  if (format === "condensed" || messageRows.length === 0) {
+    return sections.join("\n\n");
   }
 
-  const parts: string[] = [headerLine, summaryBlock, rangeBlock, "Original message content:"];
-  let charBudget = MAX_OUTPUT_CHARS - parts.join("\n\n").length;
+  remainingChars = appendSection(sections, remainingChars, "Original message content:");
+
   let shown = 0;
-
   for (const row of messageRows) {
-    const line = `  [#${row.sequence_number} ${row.role}] ${row.content}`;
-    if (charBudget - line.length < 0) break;
-    parts.push(line);
-    charBudget -= line.length + 1;
+    const block = `[#${row.sequence_number} ${row.role}] ${row.content}`;
+    const nextRemaining = appendSection(sections, remainingChars, block);
+    if (nextRemaining === remainingChars) {
+      break;
+    }
+    remainingChars = nextRemaining;
     shown++;
   }
 
   const remaining = messageRows.length - shown;
   if (remaining > 0) {
-    parts.push(`  ... (${remaining} more messages not shown)`);
+    appendSection(sections, remainingChars, `... (${remaining} more messages not shown)`);
   }
 
-  return parts.join("\n");
+  return sections.join("\n\n");
 }
 
 function expandMessageRange(

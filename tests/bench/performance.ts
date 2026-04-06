@@ -18,6 +18,13 @@ declare global {
   var __lcm_bench_mock: boolean | undefined;
 }
 
+type PipelineMessage = Parameters<typeof runPipeline>[1][number];
+
+interface BenchMeasurement {
+  name: string;
+  durations: number[];
+}
+
 export interface BenchResult {
   name: string;
   min: number;
@@ -27,11 +34,39 @@ export interface BenchResult {
   unit: string;
 }
 
+function roundMs(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
+function summarizeDurations(name: string, durations: number[]): BenchResult {
+  const sortedDurations = [...durations].sort((a, b) => a - b);
+  const min = sortedDurations[0] ?? 0;
+  const max = sortedDurations[sortedDurations.length - 1] ?? 0;
+  const avg =
+    sortedDurations.length === 0
+      ? 0
+      : sortedDurations.reduce((sum, duration) => sum + duration, 0) / sortedDurations.length;
+  const p95Index = Math.min(
+    sortedDurations.length - 1,
+    Math.floor(sortedDurations.length * 0.95),
+  );
+  const p95 = sortedDurations[p95Index] ?? 0;
+
+  return {
+    name,
+    min: roundMs(min),
+    max: roundMs(max),
+    avg: roundMs(avg),
+    p95: roundMs(p95),
+    unit: "ms",
+  };
+}
+
 async function runBench(
   name: string,
   fn: () => Promise<void> | void,
   iterations = 100,
-): Promise<BenchResult> {
+): Promise<BenchMeasurement> {
   const durations: number[] = [];
 
   for (let i = 0; i < iterations; i++) {
@@ -41,22 +76,102 @@ async function runBench(
     durations.push(end - start);
   }
 
-  durations.sort((a, b) => a - b);
+  return { name, durations };
+}
 
-  const min = durations[0]!;
-  const max = durations[durations.length - 1]!;
-  const avg = durations.reduce((sum, d) => sum + d, 0) / durations.length;
-  const p95Index = Math.floor(durations.length * 0.95);
-  const p95 = durations[p95Index]!;
+function toBenchResult(measurement: BenchMeasurement): BenchResult {
+  return summarizeDurations(measurement.name, measurement.durations);
+}
 
-  return {
+function combineMeasurements(name: string, measurements: BenchMeasurement[]): BenchResult {
+  return summarizeDurations(
     name,
-    min: Math.round(min * 1000) / 1000,
-    max: Math.round(max * 1000) / 1000,
-    avg: Math.round(avg * 1000) / 1000,
-    p95: Math.round(p95 * 1000) / 1000,
-    unit: "ms",
+    measurements.flatMap((measurement) => measurement.durations),
+  );
+}
+
+function pad(str: string, width: number, align: "left" | "right" = "left"): string {
+  return align === "right" ? str.padStart(width) : str.padEnd(width);
+}
+
+function formatNum(value: number): string {
+  return value.toFixed(3);
+}
+
+export function printBenchmarkTable(results: BenchResult[]): void {
+  const colWidths = {
+    category: Math.max(8, ...results.map((result) => result.name.length)),
+    min: 8,
+    max: 8,
+    avg: 8,
+    p95: 8,
   };
+
+  const border = {
+    topLeft: "+",
+    topMid: "+",
+    topRight: "+",
+    midLeft: "+",
+    midMid: "+",
+    midRight: "+",
+    bottomLeft: "+",
+    bottomMid: "+",
+    bottomRight: "+",
+    horizontal: "-",
+    vertical: "|",
+  };
+
+  const horizontalLine = (left: string, mid: string, right: string): string =>
+    [
+      left,
+      border.horizontal.repeat(colWidths.category + 2),
+      mid,
+      border.horizontal.repeat(colWidths.min + 2),
+      mid,
+      border.horizontal.repeat(colWidths.max + 2),
+      mid,
+      border.horizontal.repeat(colWidths.avg + 2),
+      mid,
+      border.horizontal.repeat(colWidths.p95 + 2),
+      right,
+    ].join("");
+
+  const row = (category: string, min: string, max: string, avg: string, p95: string): string =>
+    [
+      border.vertical,
+      ` ${pad(category, colWidths.category)} `,
+      border.vertical,
+      ` ${pad(min, colWidths.min, "right")} `,
+      border.vertical,
+      ` ${pad(max, colWidths.max, "right")} `,
+      border.vertical,
+      ` ${pad(avg, colWidths.avg, "right")} `,
+      border.vertical,
+      ` ${pad(p95, colWidths.p95, "right")} `,
+      border.vertical,
+    ].join("");
+
+  process.stdout.write(`${horizontalLine(border.topLeft, border.topMid, border.topRight)}\n`);
+  process.stdout.write(
+    `${row("Category", "Min (ms)", "Max (ms)", "Avg (ms)", "P95 (ms)")}\n`,
+  );
+  process.stdout.write(`${horizontalLine(border.midLeft, border.midMid, border.midRight)}\n`);
+
+  for (const result of results) {
+    process.stdout.write(
+      `${row(
+        result.name,
+        formatNum(result.min),
+        formatNum(result.max),
+        formatNum(result.avg),
+        formatNum(result.p95),
+      )}\n`,
+    );
+  }
+
+  process.stdout.write(
+    `${horizontalLine(border.bottomLeft, border.bottomMid, border.bottomRight)}\n`,
+  );
 }
 
 function makeLcmMessage(
@@ -66,6 +181,7 @@ function makeLcmMessage(
 ): LcmMessage {
   const role = index % 2 === 0 ? "user" : ("assistant" as const);
   const content = `Benchmark message ${index}: This is a realistic message content for benchmarking purposes. It contains enough text to be representative of real conversations.`;
+
   return {
     id: crypto.randomUUID(),
     role,
@@ -79,44 +195,14 @@ function makeLcmMessage(
   };
 }
 
-// Benchmark 1: Message Persistence Throughput
-async function benchMessagePersistence(): Promise<BenchResult> {
-  const db = createTestDb();
-  const conversationId = crypto.randomUUID();
-  const sessionId = `session-${conversationId}`;
-
+function seedConversation(db: ReturnType<typeof createTestDb>, conversationId: string, sessionId: string): void {
   db.query("INSERT OR IGNORE INTO conversations (id, session_id) VALUES (?, ?)").run(
     conversationId,
     sessionId,
   );
-
-  let msgIndex = 0;
-
-  const result = await runBench(
-    "Message Persistence",
-    () => {
-      const msg = makeLcmMessage(msgIndex++, conversationId, sessionId);
-      persistMessage(db, conversationId, msg);
-    },
-    100,
-  );
-
-  db.close();
-  return result;
 }
 
-// Benchmark 2a: DAG Leaf Query
-async function benchDagLeafQuery(): Promise<BenchResult> {
-  const db = createTestDb();
-  const conversationId = crypto.randomUUID();
-  const sessionId = `session-${conversationId}`;
-
-  db.query("INSERT OR IGNORE INTO conversations (id, session_id) VALUES (?, ?)").run(
-    conversationId,
-    sessionId,
-  );
-
-  // Seed 50 summaries across 3 depths
+function seedDagSummaries(db: ReturnType<typeof createTestDb>, conversationId: string): void {
   const depth0Ids: string[] = [];
   for (let i = 0; i < 20; i++) {
     const id = storeSummary(db, conversationId, {
@@ -156,157 +242,67 @@ async function benchDagLeafQuery(): Promise<BenchResult> {
       conversationId,
     });
   }
-
-  const result = await runBench(
-    "DAG Leaf Query",
-    () => {
-      getLeafSummaries(db, conversationId);
-    },
-    100,
-  );
-
-  db.close();
-  return result;
 }
 
-// Benchmark 2b: DAG Root Query
-async function benchDagRootQuery(): Promise<BenchResult> {
+async function benchMessagePersistence(): Promise<BenchResult> {
   const db = createTestDb();
   const conversationId = crypto.randomUUID();
   const sessionId = `session-${conversationId}`;
 
-  db.query("INSERT OR IGNORE INTO conversations (id, session_id) VALUES (?, ?)").run(
-    conversationId,
-    sessionId,
-  );
+  seedConversation(db, conversationId, sessionId);
 
-  const depth0Ids: string[] = [];
-  for (let i = 0; i < 20; i++) {
-    const id = storeSummary(db, conversationId, {
-      depth: 0,
-      content: `Leaf summary ${i}: detailed batch summary.`,
-      tokenCount: 40,
-      parentIds: [],
-      messageIds: [],
-      compactionLevel: "normal",
-      conversationId,
-    });
-    depth0Ids.push(id);
+  let msgIndex = 0;
+
+  try {
+    const measurement = await runBench(
+      "Message Persistence",
+      () => {
+        const msg = makeLcmMessage(msgIndex++, conversationId, sessionId);
+        persistMessage(db, conversationId, msg);
+      },
+      100,
+    );
+
+    return toBenchResult(measurement);
+  } finally {
+    db.close();
   }
-
-  const depth1Ids: string[] = [];
-  for (let i = 0; i < 20; i++) {
-    const id = storeSummary(db, conversationId, {
-      depth: 1,
-      content: `Mid summary ${i}: condensed view.`,
-      tokenCount: 60,
-      parentIds: [depth0Ids[i % depth0Ids.length]!],
-      messageIds: [],
-      compactionLevel: "normal",
-      conversationId,
-    });
-    depth1Ids.push(id);
-  }
-
-  for (let i = 0; i < 10; i++) {
-    storeSummary(db, conversationId, {
-      depth: 2,
-      content: `Root summary ${i}: high-level synopsis.`,
-      tokenCount: 80,
-      parentIds: [depth1Ids[i % depth1Ids.length]!],
-      messageIds: [],
-      compactionLevel: "normal",
-      conversationId,
-    });
-  }
-
-  const result = await runBench(
-    "DAG Root Query",
-    () => {
-      getRootSummaries(db, conversationId);
-    },
-    100,
-  );
-
-  db.close();
-  return result;
 }
 
-// Benchmark 2c: DAG Tree Query
-async function benchDagTreeQuery(): Promise<BenchResult> {
+async function benchDagQuery(): Promise<BenchResult> {
   const db = createTestDb();
   const conversationId = crypto.randomUUID();
   const sessionId = `session-${conversationId}`;
 
-  db.query("INSERT OR IGNORE INTO conversations (id, session_id) VALUES (?, ?)").run(
-    conversationId,
-    sessionId,
-  );
+  seedConversation(db, conversationId, sessionId);
+  seedDagSummaries(db, conversationId);
 
-  const depth0Ids: string[] = [];
-  for (let i = 0; i < 20; i++) {
-    const id = storeSummary(db, conversationId, {
-      depth: 0,
-      content: `Leaf summary ${i}: detailed batch summary.`,
-      tokenCount: 40,
-      parentIds: [],
-      messageIds: [],
-      compactionLevel: "normal",
-      conversationId,
-    });
-    depth0Ids.push(id);
+  try {
+    const measurements = await Promise.all([
+      runBench("DAG Leaf Query", () => {
+        getLeafSummaries(db, conversationId);
+      }),
+      runBench("DAG Root Query", () => {
+        getRootSummaries(db, conversationId);
+      }),
+      runBench("DAG Tree Query", () => {
+        getSummaryTree(db, conversationId);
+      }),
+    ]);
+
+    return combineMeasurements("DAG Query", measurements);
+  } finally {
+    db.close();
   }
-
-  const depth1Ids: string[] = [];
-  for (let i = 0; i < 20; i++) {
-    const id = storeSummary(db, conversationId, {
-      depth: 1,
-      content: `Mid summary ${i}: condensed view.`,
-      tokenCount: 60,
-      parentIds: [depth0Ids[i % depth0Ids.length]!],
-      messageIds: [],
-      compactionLevel: "normal",
-      conversationId,
-    });
-    depth1Ids.push(id);
-  }
-
-  for (let i = 0; i < 10; i++) {
-    storeSummary(db, conversationId, {
-      depth: 2,
-      content: `Root summary ${i}: high-level synopsis.`,
-      tokenCount: 80,
-      parentIds: [depth1Ids[i % depth1Ids.length]!],
-      messageIds: [],
-      compactionLevel: "normal",
-      conversationId,
-    });
-  }
-
-  const result = await runBench(
-    "DAG Tree Query",
-    () => {
-      getSummaryTree(db, conversationId);
-    },
-    100,
-  );
-
-  db.close();
-  return result;
 }
 
-// Benchmark 3: FTS Search Latency
 async function benchFtsSearch(): Promise<BenchResult> {
   const db = createTestDb();
   const conversationId = crypto.randomUUID();
   const sessionId = `session-${conversationId}`;
 
-  db.query("INSERT OR IGNORE INTO conversations (id, session_id) VALUES (?, ?)").run(
-    conversationId,
-    sessionId,
-  );
+  seedConversation(db, conversationId, sessionId);
 
-  // Index 200 messages
   const topics = [
     "TypeScript async patterns and promise handling",
     "database migration strategies for SQLite",
@@ -327,30 +323,28 @@ async function benchFtsSearch(): Promise<BenchResult> {
     indexMessage(db, msgId, content, conversationId);
   }
 
-  const result = await runBench(
-    "FTS Search (200 msgs)",
-    () => {
-      searchAll(db, conversationId, "TypeScript", { limit: 10 });
-    },
-    100,
-  );
+  try {
+    const measurement = await runBench(
+      "FTS Search",
+      () => {
+        searchAll(db, conversationId, "TypeScript", { limit: 10 });
+      },
+      100,
+    );
 
-  db.close();
-  return result;
+    return toBenchResult(measurement);
+  } finally {
+    db.close();
+  }
 }
 
-// Benchmark 4: Context Assembly Time
 async function benchContextAssembly(): Promise<BenchResult> {
   const db = createTestDb();
   const conversationId = crypto.randomUUID();
   const sessionId = `session-${conversationId}`;
 
-  db.query("INSERT OR IGNORE INTO conversations (id, session_id) VALUES (?, ?)").run(
-    conversationId,
-    sessionId,
-  );
+  seedConversation(db, conversationId, sessionId);
 
-  // Seed messages and summaries
   for (let i = 0; i < 20; i++) {
     const msgId = crypto.randomUUID();
     const content = `Message ${i}: context assembly benchmark content with realistic text length for token counting purposes.`;
@@ -374,21 +368,22 @@ async function benchContextAssembly(): Promise<BenchResult> {
 
   const config = { ...DEFAULT_CONFIG, maxContextTokens: 4000 };
 
-  const result = await runBench(
-    "Context Assembly",
-    () => {
-      assembleContext(db, config, conversationId);
-    },
-    100,
-  );
+  try {
+    const measurement = await runBench(
+      "Context Assembly",
+      () => {
+        assembleContext(db, config, conversationId);
+      },
+      100,
+    );
 
-  db.close();
-  return result;
+    return toBenchResult(measurement);
+  } finally {
+    db.close();
+  }
 }
 
-// Benchmark 5: Full Pipeline Latency (mocked LLM)
 async function benchFullPipeline(): Promise<BenchResult> {
-  // Mock the AI module to avoid real LLM calls
   globalThis.__lcm_bench_mock = true;
 
   const db = createTestDb();
@@ -398,31 +393,52 @@ async function benchFullPipeline(): Promise<BenchResult> {
   const state = createSessionState({
     ...DEFAULT_CONFIG,
     dbPath: ":memory:",
-    summarizeAfterMessages: 1000, // prevent actual compaction
+    summarizeAfterMessages: 1000,
     summarizeAfterTokens: 9999999,
     enableFts: false,
   });
   state.db = db;
   state.sessionId = sessionId;
 
-  db.query("INSERT OR IGNORE INTO conversations (id, session_id) VALUES (?, ?)").run(
-    conversationId,
-    sessionId,
-  );
+  seedConversation(db, conversationId, sessionId);
 
-  // Build 10 mock TransformMessages
-  function makeTransformMessages(count: number) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const msgs: any[] = [];
+  function makeTransformMessages(count: number): PipelineMessage[] {
+    const messages: PipelineMessage[] = [];
+
     for (let i = 0; i < count; i++) {
       const id = crypto.randomUUID();
-      msgs.push({
+      const parts: PipelineMessage["parts"] = [
+        {
+          id: crypto.randomUUID(),
+          sessionID: sessionId,
+          messageID: id,
+          type: "text",
+          text: `Pipeline bench message ${i}: testing full pipeline latency with realistic message content.`,
+        },
+      ];
+
+      if (i % 2 === 0) {
+        messages.push({
+          info: {
+            id,
+            sessionID: sessionId,
+            role: "user",
+            time: { created: Date.now() - (count - i) * 1000 },
+            agent: "benchmark",
+            model: { providerID: "anthropic", modelID: "claude-3-5-sonnet-20241022" },
+          },
+          parts,
+        });
+        continue;
+      }
+
+      messages.push({
         info: {
           id,
           sessionID: sessionId,
-          role: i % 2 === 0 ? "user" : "assistant",
+          role: "assistant",
           time: { created: Date.now() - (count - i) * 1000, completed: Date.now() },
-          parentID: i > 0 ? msgs[i - 1]!.info.id : crypto.randomUUID(),
+          parentID: i > 0 ? messages[i - 1]!.info.id : crypto.randomUUID(),
           modelID: "claude-3-5-sonnet-20241022",
           providerID: "anthropic",
           mode: "default",
@@ -430,120 +446,113 @@ async function benchFullPipeline(): Promise<BenchResult> {
           summary: false,
           cost: 0,
           tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-          model: { providerID: "anthropic", modelID: "claude-3-5-sonnet-20241022" },
         },
-        parts: [
-          {
-            id: crypto.randomUUID(),
-            sessionID: sessionId,
-            messageID: id,
-            type: "text" as const,
-            text: `Pipeline bench message ${i}: testing full pipeline latency with realistic message content.`,
-          },
-        ],
+        parts,
       });
     }
-    return msgs;
+
+    return messages;
   }
 
-  // Pre-warm by running once
-  const warmupMsgs = makeTransformMessages(5);
-  await runPipeline(state, warmupMsgs);
+  try {
+    const warmupMessages = makeTransformMessages(5);
+    await runPipeline(state, warmupMessages);
 
-  let callCount = 0;
-  const result = await runBench(
-    "Full Pipeline (10 msgs)",
-    async () => {
-      // Each iteration creates a fresh batch of new messages (new UUIDs each time)
-      const msgs = makeTransformMessages(10);
-      // Assign unique IDs on each call so pipeline persists them
-      for (const m of msgs) {
-        m.info.id = crypto.randomUUID();
-        m.parts[0].messageID = m.info.id;
-        m.parts[0].id = crypto.randomUUID();
-      }
-      callCount++;
-      await runPipeline(state, msgs);
-    },
-    20, // fewer iterations since pipeline does more work
-  );
+    const measurement = await runBench(
+      "Full Pipeline",
+      async () => {
+        const messages = makeTransformMessages(10);
 
-  db.close();
-  return result;
+        for (const message of messages) {
+          message.info.id = crypto.randomUUID();
+          message.parts[0]!.messageID = message.info.id;
+          message.parts[0]!.id = crypto.randomUUID();
+        }
+
+        await runPipeline(state, messages);
+      },
+      20,
+    );
+
+    return toBenchResult(measurement);
+  } finally {
+    globalThis.__lcm_bench_mock = undefined;
+    db.close();
+  }
 }
 
 function makeRealisticText(targetChars: number): string {
   const words =
     "the quick brown fox jumps over the lazy dog TypeScript async await function class interface export import const let var return promise resolve reject error catch finally try ";
   let result = "";
+
   while (result.length < targetChars) {
     result += words;
   }
+
   return result.slice(0, targetChars);
 }
 
-async function benchTokenCounting10K(): Promise<BenchResult> {
-  const text = makeRealisticText(10_000);
-  countTokens(text);
+async function benchTokenCounting(): Promise<BenchResult> {
+  const cases = [
+    { name: "Token Counting (10K chars)", text: makeRealisticText(10_000), iterations: 50 },
+    { name: "Token Counting (50K chars)", text: makeRealisticText(50_000), iterations: 20 },
+    { name: "Token Counting (100K chars)", text: makeRealisticText(100_000), iterations: 10 },
+  ];
 
-  return await runBench(
-    "Token Counting (10K chars)",
-    () => {
-      countTokens(text);
-    },
-    50,
-  );
-}
+  for (const benchCase of cases) {
+    countTokens(benchCase.text);
+  }
 
-async function benchTokenCounting50K(): Promise<BenchResult> {
-  const text = makeRealisticText(50_000);
-  countTokens(text);
+  const measurements: BenchMeasurement[] = [];
 
-  return await runBench(
-    "Token Counting (50K chars)",
-    () => {
-      countTokens(text);
-    },
-    20,
-  );
-}
+  for (const benchCase of cases) {
+    measurements.push(
+      await runBench(
+        benchCase.name,
+        () => {
+          countTokens(benchCase.text);
+        },
+        benchCase.iterations,
+      ),
+    );
+  }
 
-async function benchTokenCounting100K(): Promise<BenchResult> {
-  const text = makeRealisticText(100_000);
-  countTokens(text);
-
-  return await runBench(
-    "Token Counting (100K chars)",
-    () => {
-      countTokens(text);
-    },
-    10,
-  );
+  return combineMeasurements("Token Counting", measurements);
 }
 
 export async function runAllBenchmarks(): Promise<BenchResult[]> {
-  const results: BenchResult[] = [];
-
   process.stdout.write("Running benchmarks...\n\n");
 
   const benches = [
     { name: "Message Persistence", fn: benchMessagePersistence },
-    { name: "DAG Leaf Query", fn: benchDagLeafQuery },
-    { name: "DAG Root Query", fn: benchDagRootQuery },
-    { name: "DAG Tree Query", fn: benchDagTreeQuery },
+    { name: "DAG Query", fn: benchDagQuery },
     { name: "FTS Search", fn: benchFtsSearch },
     { name: "Context Assembly", fn: benchContextAssembly },
     { name: "Full Pipeline", fn: benchFullPipeline },
-    { name: "Token Counting 10K", fn: benchTokenCounting10K },
-    { name: "Token Counting 50K", fn: benchTokenCounting50K },
-    { name: "Token Counting 100K", fn: benchTokenCounting100K },
+    { name: "Token Counting", fn: benchTokenCounting },
   ];
+
+  const results: BenchResult[] = [];
 
   for (const bench of benches) {
     process.stdout.write(`  Running: ${bench.name}...\n`);
-    const result = await bench.fn();
-    results.push(result);
+    results.push(await bench.fn());
   }
 
   return results;
+}
+
+async function main(): Promise<void> {
+  const startTime = performance.now();
+  const results = await runAllBenchmarks();
+  const totalMs = performance.now() - startTime;
+
+  process.stdout.write("\n");
+  printBenchmarkTable(results);
+  process.stdout.write(`\nTotal runtime: ${(totalMs / 1000).toFixed(2)}s\n`);
+}
+
+if (import.meta.main) {
+  await main();
 }

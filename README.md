@@ -39,6 +39,45 @@ For local development, point OpenCode at this repository according to your local
 
 LCM stores every conversation message in SQLite, indexes message and summary text with FTS5/BM25, and compacts older history into a summary DAG instead of a single flat summary.
 
+```text
+User Message
+    |
+    v
+chat.message hook
+    |
+    v
+Persist to DB -----> Track Session
+    |
+    v
+messages.transform hook
+    |
+    v
+Check Compaction Thresholds
+    |
+    +-------------------------------+
+    | threshold met                 |
+    v                               |
+Compaction Engine                   |
+    |                               |
+    v                               |
+Summarize Messages                  |
+    |                               |
+    v                               |
+Store in DAG -----> Update FTS <----+
+    |
+    v
+Assemble Context
+    |
+    v
+BM25 Retrieve Relevant
+    |
+    v
+Format XML
+    |
+    v
+Return Transformed Messages
+```
+
 High-level flow:
 
 1. Persist incoming messages to SQLite.
@@ -193,8 +232,11 @@ bun run bench
 
 There is no separate build step. Bun runs the TypeScript entrypoint directly via `main: "src/index.ts"`.
 
-## Credits/License
+## Credits
 
 - Inspired by the LCM paper: [Lossless Context Management for Agentic AI](https://arxiv.org/abs/2502.14258)
 - Reference implementation inspiration: [lossless-claw](https://github.com/martian-engineering/lossless-claw)
-- License: MIT
+
+## License
+
+MIT

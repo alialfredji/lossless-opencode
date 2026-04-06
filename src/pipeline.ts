@@ -180,34 +180,49 @@ function toTransformMessages(
   return messages.map((message) => {
     const infoId = crypto.randomUUID();
     const created = Date.now();
-    const info: OpenCodeMessage = {
-      id: infoId,
-      sessionID: sessionId,
-      role: "assistant",
-      time: {
-        created,
-        completed: created,
-      },
-      parentID,
-      modelID: model.modelID,
-      providerID: model.providerID,
-      mode: "default",
-      path: {
-        cwd: "",
-        root: "",
-      },
-      summary: false,
-      cost: 0,
-      tokens: {
-        input: 0,
-        output: 0,
-        reasoning: 0,
-        cache: {
-          read: 0,
-          write: 0,
-        },
-      },
-    };
+    const info: OpenCodeMessage =
+      message.role === "user"
+        ? {
+            id: infoId,
+            sessionID: sessionId,
+            role: message.role,
+            time: {
+              created,
+            },
+            agent: "lcm",
+            model: {
+              providerID: model.providerID,
+              modelID: model.modelID,
+            },
+          }
+        : {
+            id: infoId,
+            sessionID: sessionId,
+            role: message.role === "assistant" ? message.role : "assistant",
+            time: {
+              created,
+              completed: created,
+            },
+            parentID,
+            modelID: model.modelID,
+            providerID: model.providerID,
+            mode: "default",
+            path: {
+              cwd: "",
+              root: "",
+            },
+            summary: false,
+            cost: 0,
+            tokens: {
+              input: 0,
+              output: 0,
+              reasoning: 0,
+              cache: {
+                read: 0,
+                write: 0,
+              },
+            },
+          };
 
     parentID = infoId;
 
