@@ -1,6 +1,34 @@
 {
   "name": "lossless-opencode",
   "version": "0.1.0",
+  "description": "Lossless Context Management plugin for OpenCode — hierarchical DAG-based summarization with BM25 retrieval",
+  "license": "MIT",
+  "author": "Ali Alfred Ji",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alialfredji/lossless-opencode.git"
+  },
+  "homepage": "https://github.com/alialfredji/lossless-opencode#readme",
+  "bugs": {
+    "url": "https://github.com/alialfredji/lossless-opencode/issues"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "context-management",
+    "lcm",
+    "lossless",
+    "bm25",
+    "summarization",
+    "dag",
+    "ai",
+    "llm"
+  ],
+  "files": [
+    "src/",
+    "LICENSE",
+    "README.md"
+  ],
   "type": "module",
   "main": "src/index.ts",
   "scripts": {

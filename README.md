@@ -1,7 +1,7 @@
 # lossless-opencode
 
 [![npm](https://img.shields.io/npm/v/lossless-opencode)](https://www.npmjs.com/package/lossless-opencode)
-[![tests](https://img.shields.io/badge/tests-181%20passing-brightgreen)](https://github.com/your-org/lossless-opencode)
+[![tests](https://img.shields.io/badge/tests-181%20passing-brightgreen)](https://github.com/alialfredji/lossless-opencode)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 Lossless context management plugin for OpenCode with hierarchical summaries, DAG history, and BM25 retrieval.
@@ -14,30 +14,39 @@ BM25 retrieval keeps relevant prior details accessible, so the model can recover
 
 ## Installation
 
-Install the plugin package:
+Install from npm:
 
 ```bash
 bun add lossless-opencode
 ```
 
-Register it in your OpenCode config as a plugin:
+Then add it to your OpenCode config (`~/.config/opencode/opencode.json`):
 
 ```json
 {
   "plugin": [
-    [
-      "lossless-opencode",
-      {
-        "lcm": {
-          "dataDir": ".lcm"
-        }
-      }
-    ]
+    "lossless-opencode"
   ]
 }
 ```
 
-For local development, point OpenCode at this repository according to your local plugin-loading setup.
+With custom options:
+
+```json
+{
+  "plugin": [
+    ["lossless-opencode", {
+      "lcm": {
+        "model": "anthropic/claude-sonnet-4-20250514",
+        "maxContextTokens": 120000,
+        "freshTailSize": 64
+      }
+    }]
+  ]
+}
+```
+
+All config options go under the `lcm` key. See the [Configuration](#configuration) section below for all available options.
 
 ## How It Works
 
