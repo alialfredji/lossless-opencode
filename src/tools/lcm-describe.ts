@@ -2,8 +2,7 @@ import type { Database } from "bun:sqlite";
 import { tool } from "@opencode-ai/plugin";
 import { getMessageCount, getUnsummarizedMessages } from "../messages/persistence";
 import { determineCompactionLevel } from "../compaction/engine";
-import type { HookSessionState, } from "../index";
-import type { LcmConfig } from "../types";
+import type { HookSessionState, LcmConfig } from "../types";
 
 interface DepthCountRow {
   depth: number;

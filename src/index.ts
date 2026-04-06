@@ -1,21 +1,19 @@
 import type { Database } from "bun:sqlite";
-import type { Config, Hooks, Plugin, PluginInput, ToolDefinition } from "@opencode-ai/plugin";
-import { tool } from "@opencode-ai/plugin";
+import type { Hooks, Plugin, PluginInput, ToolDefinition } from "@opencode-ai/plugin";
+import { createConfigHook, mergeConfig } from "./config/defaults";
 import { createDatabase } from "./db/database";
 import { runMigrations } from "./db/migrations";
 import { persistMessage } from "./messages/persistence";
 import { runPipeline } from "./pipeline";
-import { DEFAULT_CONFIG, type LcmConfig, type LcmMessage } from "./types";
+import { createNewSessionCommand, createResetCommand } from "./session/manager";
+import { createDescribeToolDefinition } from "./tools/lcm-describe";
+import { createExpandQueryToolDefinition } from "./tools/lcm-expand-query";
+import { createGrepToolDefinition } from "./tools/lcm-grep";
+import { LcmConfigSchema, type HookSessionState, type LcmConfig, type LcmMessage } from "./types";
 import { countTokens } from "./utils/tokens";
 import { resolve } from "path";
 
-export interface HookSessionState {
-  sessionId: string | null;
-  db: Database | null;
-  config: LcmConfig;
-  isCompacting: boolean;
-  compactionCount: number;
-}
+export type { HookSessionState } from "./types";
 
 type ChatMessageHook = NonNullable<Hooks["chat.message"]>;
 type ChatMessageInput = Parameters<ChatMessageHook>[0];
@@ -26,23 +24,11 @@ type SessionCompactingHook = NonNullable<Hooks["experimental.session.compacting"
 type SessionCompactingInput = Parameters<SessionCompactingHook>[0];
 type SessionCompactingOutput = Parameters<SessionCompactingHook>[1];
 
-interface StubToolDefinition extends ToolDefinition {
-  parameters: {
-    type: "object";
-    properties: Record<string, never>;
-    additionalProperties: false;
-    required: [];
-  };
-}
-
 export function createSessionState(config?: Partial<LcmConfig>): HookSessionState {
   return {
     sessionId: null,
     db: null,
-    config: {
-      ...DEFAULT_CONFIG,
-      ...config,
-    },
+    config: mergeConfig(config),
     isCompacting: false,
     compactionCount: 0,
   };
@@ -106,24 +92,6 @@ function toPersistedMessage(
   };
 }
 
-function createStubTool(description: string): StubToolDefinition {
-  return {
-    ...tool({
-      description,
-      args: {},
-      async execute() {
-        return "Not yet implemented";
-      },
-    }),
-    parameters: {
-      type: "object",
-      properties: {},
-      additionalProperties: false,
-      required: [],
-    },
-  };
-}
-
 export function createChatMessageHandler(state: HookSessionState, directory: string) {
   return async (
     input: ChatMessageInput,
@@ -155,7 +123,7 @@ export function createSessionCompactingHandler(state: HookSessionState = createS
     _input: SessionCompactingInput,
     output: SessionCompactingOutput,
   ): Promise<void> => {
-    state.compactionCount += 1;
+    state.compactionCount = (state.compactionCount ?? 0) + 1;
 
     if (state.isCompacting) {
       output.prompt = "LCM compaction already running. Do not summarize.";
@@ -198,29 +166,41 @@ export function createSessionCompactingHandler(state: HookSessionState = createS
   };
 }
 
-export function createConfigHandler() {
-  return async (config: Config): Promise<void> => {
-    (config as Config & { maxTokens: number }).maxTokens = 999999;
-  };
+export function createConfigHandler(state: HookSessionState) {
+  return createConfigHook(state);
 }
 
-export function createToolHooks(): Record<string, StubToolDefinition> {
+export function createToolHooks(state: HookSessionState): Record<string, ToolDefinition> {
   return {
-    lcm_grep: createStubTool("Search persisted LCM state. Not yet implemented."),
-    lcm_describe: createStubTool("Describe LCM state. Not yet implemented."),
-    lcm_expand_query: createStubTool("Expand LCM retrieval queries. Not yet implemented."),
+    lcm_grep: createGrepToolDefinition(state),
+    lcm_describe: createDescribeToolDefinition(state),
+    lcm_expand_query: createExpandQueryToolDefinition(state),
+    lcm_new: createNewSessionCommand(state),
+    lcm_reset: createResetCommand(state),
   };
 }
 
-const plugin: Plugin = async (ctx: PluginInput) => {
-  const state = createSessionState();
+function extractInitialConfig(options?: Record<string, unknown>): Partial<LcmConfig> | undefined {
+  if (!options || typeof options !== "object") {
+    return undefined;
+  }
+
+  const candidate =
+    "lcm" in options && options.lcm && typeof options.lcm === "object" ? options.lcm : options;
+  const parsed = LcmConfigSchema.parse(candidate);
+
+  return Object.keys(parsed).length > 0 ? parsed : undefined;
+}
+
+const plugin: Plugin = async (ctx: PluginInput, options) => {
+  const state = createSessionState(extractInitialConfig(options));
 
   return {
     "chat.message": createChatMessageHandler(state, ctx.directory),
     "experimental.chat.messages.transform": createMessagesTransformHandler(state),
     "experimental.session.compacting": createSessionCompactingHandler(state),
-    tool: createToolHooks(),
-    config: createConfigHandler(),
+    tool: createToolHooks(state),
+    config: createConfigHandler(state),
   };
 };
 

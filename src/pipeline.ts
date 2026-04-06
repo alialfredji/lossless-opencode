@@ -12,9 +12,8 @@ import {
 import { indexMessage } from "./search/indexer";
 import { shouldSummarize } from "./summarization/summarizer";
 import { getRootSummaries } from "./summaries/dag-store";
-import type { LcmMessage } from "./types";
+import type { HookSessionState, LcmMessage } from "./types";
 import { countTokens } from "./utils/tokens";
-import type { HookSessionState } from "./index";
 
 type TransformHook = NonNullable<Hooks["experimental.chat.messages.transform"]>;
 type TransformMessage = Parameters<TransformHook>[1]["messages"][number];
@@ -314,6 +313,9 @@ export async function runPipeline(
       (total, message) => total + message.tokenCount,
       0,
     );
+    const hasLargeContent = transformedMessages.some(
+      (message) => detectLargeContent(toLcmMessage(state.sessionId!, message), state.config.largeFileThreshold).isLarge,
+    );
 
     if (
       shouldSummarize(
@@ -321,7 +323,8 @@ export async function runPipeline(
         unsummarizedTokenCount,
         state.config,
       ) &&
-      !state.isCompacting
+      !state.isCompacting &&
+      !hasLargeContent
     ) {
       state.isCompacting = true;
 

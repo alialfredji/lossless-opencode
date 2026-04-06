@@ -30,6 +30,38 @@ type CondenseStats = {
 
 const MIN_SUMMARIES_TO_CONDENSE = 5;
 
+function resolveTokenThresholds(config: LcmConfig): {
+  soft: number;
+  hard: number;
+} {
+  const derivedSoft = Math.max(1, Math.floor(config.maxContextTokens * 0.7));
+  const derivedHard = Math.max(derivedSoft, Math.floor(config.maxContextTokens * 0.9));
+
+  const softBase =
+    config.softTokenThreshold > 0 && config.softTokenThreshold < config.maxContextTokens
+      ? config.softTokenThreshold
+      : derivedSoft;
+  const soft = Math.min(softBase, Math.max(1, config.leafSummaryBudget * 4));
+  const hard =
+    config.hardTokenThreshold > soft && config.hardTokenThreshold <= config.maxContextTokens
+      ? config.hardTokenThreshold
+      : derivedHard;
+
+  return { soft, hard };
+}
+
+function getConversationTokenLoad(db: Database, sessionId: string): number {
+  const unsummarizedTokenCount = getSummaryTokenCount(getUnsummarizedMessages(db, sessionId));
+  const summaries = [...getLeafSummaries(db, sessionId), ...getRootSummaries(db, sessionId)];
+  const uniqueSummaries = new Map(summaries.map((summary) => [summary.id, summary]));
+  const summaryTokenCount = Array.from(uniqueSummaries.values()).reduce(
+    (total, summary) => total + summary.tokenCount,
+    0,
+  );
+
+  return unsummarizedTokenCount + summaryTokenCount;
+}
+
 function getMaxRootDepth(db: Database, sessionId: string): number {
   const rootSummaries = getRootSummaries(db, sessionId);
 
@@ -101,7 +133,11 @@ async function condenseSummariesInternal(
 
   const batch = toSummaryMessages(sessionId, childSummaries);
   const nextDepth = depth + 1;
-  const nextLevel = resolveCompactionLevelForDepth(nextDepth, config);
+  const tokenLevel = determineCompactionLevel(db, sessionId, config);
+  const nextLevel =
+    tokenLevel === "aggressive"
+      ? "aggressive"
+      : resolveCompactionLevelForDepth(nextDepth, config);
   const [result] = await batchSummarize(config, [batch], {
     depth: nextDepth,
     aggressive: nextLevel === "aggressive",
@@ -138,6 +174,7 @@ export async function compact(
   let summariesCreated = 0;
   let tokensProcessed = 0;
   let maxDepth = getMaxRootDepth(db, sessionId);
+  const { soft } = resolveTokenThresholds(config);
 
   if (determineCompactionLevel(db, sessionId, config) === "deterministic") {
     await deterministicTruncate(db, config, sessionId);
@@ -146,16 +183,14 @@ export async function compact(
 
   const unsummarizedMessages = getUnsummarizedMessages(db, sessionId);
   const unsummarizedTokenCount = getSummaryTokenCount(unsummarizedMessages);
+  const currentTokenLoad = getConversationTokenLoad(db, sessionId);
+  const level = determineCompactionLevel(db, sessionId, config);
+  const shouldCompact =
+    level === "aggressive" ||
+    (shouldSummarize(unsummarizedMessages.length, unsummarizedTokenCount, config) &&
+      currentTokenLoad >= soft);
 
-  if (
-    shouldSummarize(
-      unsummarizedMessages.length,
-      unsummarizedTokenCount,
-      config,
-    )
-  ) {
-    const level = determineCompactionLevel(db, sessionId, config);
-
+  if (unsummarizedMessages.length > 0 && shouldCompact) {
     if (level === "deterministic") {
       await deterministicTruncate(db, config, sessionId);
     } else {
@@ -231,9 +266,15 @@ export function determineCompactionLevel(
   config: LcmConfig,
 ): CompactionLevel {
   const maxDepth = getMaxRootDepth(db, sessionId);
+  const { soft, hard } = resolveTokenThresholds(config);
+  const tokenLoad = getConversationTokenLoad(db, sessionId);
 
   if (maxDepth >= config.maxSummaryDepth) {
     return "deterministic";
+  }
+
+  if (tokenLoad >= hard) {
+    return "aggressive";
   }
 
   if (maxDepth >= config.aggressiveThreshold) {

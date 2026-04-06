@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { tool } from "@opencode-ai/plugin";
-import type { HookSessionState } from "../index";
+import type { HookSessionState } from "../types";
 import { getMessages } from "../messages/persistence";
 import { searchAll } from "../search/indexer";
 import { getMessagesForSummary } from "../summaries/dag-store";

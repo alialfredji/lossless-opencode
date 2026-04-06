@@ -15,7 +15,7 @@ describe("defaults", () => {
     expect(DEFAULT_CONFIG.condensedSummaryBudget).toBe(2000);
     expect(DEFAULT_CONFIG.maxSummaryDepth).toBe(5);
     expect(DEFAULT_CONFIG.aggressiveThreshold).toBe(3);
-    expect(DEFAULT_CONFIG.model).toBe("anthropic:claude-sonnet-4-20250514");
+    expect(DEFAULT_CONFIG.model).toBe("");
     expect(DEFAULT_CONFIG.enableIntegrity).toBe(true);
     expect(DEFAULT_CONFIG.enableFts).toBe(true);
     expect(DEFAULT_CONFIG.largeFileThreshold).toBe(50000);

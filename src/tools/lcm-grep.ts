@@ -2,7 +2,7 @@ import type { Database } from "bun:sqlite";
 import { tool } from "@opencode-ai/plugin";
 import { z } from "zod";
 import { searchMessages, searchSummaries } from "../search/indexer";
-import type { HookSessionState } from "../index";
+import type { HookSessionState } from "../types";
 
 const DEFAULT_LIMIT = 10;
 

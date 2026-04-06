@@ -1,3 +1,4 @@
+import type { Database } from "bun:sqlite";
 import { z } from "zod";
 
 export interface LcmConfig {
@@ -21,6 +22,14 @@ export interface LcmConfig {
   dbPath: string;
   summarizeAfterMessages: number;
   summarizeAfterTokens: number;
+}
+
+export interface HookSessionState {
+  sessionId: string | null;
+  db: Database | null;
+  config: LcmConfig;
+  isCompacting: boolean;
+  compactionCount?: number;
 }
 
 export interface LcmMessage {
@@ -134,7 +143,7 @@ export const DEFAULT_CONFIG: LcmConfig = {
   summaryMaxOverageFactor: 3,
   compactionBatchSize: 10,
   aggressiveThreshold: 3,
-  model: "anthropic:claude-sonnet-4-20250514",
+  model: "",
   enableIntegrity: true,
   enableFts: true,
   largeFileThreshold: 50000,
@@ -145,13 +154,19 @@ export const DEFAULT_CONFIG: LcmConfig = {
 
 export const LcmConfigSchema = z
   .object({
+    maxContextTokens: z.number().positive(),
     softTokenThreshold: z.number().positive(),
     hardTokenThreshold: z.number().positive(),
     freshTailSize: z.number().positive(),
     maxLeafSummaryTokens: z.number().positive(),
     maxCondensedSummaryTokens: z.number().positive(),
+    leafSummaryBudget: z.number().positive(),
+    condensedSummaryBudget: z.number().positive(),
+    maxSummaryDepth: z.number().int().positive(),
+    aggressiveThreshold: z.number().positive(),
     summaryMaxOverageFactor: z.number().positive(),
     compactionBatchSize: z.number().positive(),
+    model: z.string(),
     largeFileThreshold: z.number().positive(),
     dbPath: z.string().min(1),
     summarizeAfterMessages: z.number().positive(),

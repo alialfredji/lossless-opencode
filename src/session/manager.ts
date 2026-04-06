@@ -1,7 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { tool } from "@opencode-ai/plugin";
-import type { HookSessionState } from "../index";
-import type { SessionState } from "../types";
+import type { HookSessionState, SessionState } from "../types";
 
 export interface SessionInfo {
   sessionId: string;

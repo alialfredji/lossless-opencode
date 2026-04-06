@@ -86,6 +86,8 @@ describe("compaction engine", () => {
       mockConfig({
         summarizeAfterMessages: 20,
         summarizeAfterTokens: 999999,
+        softTokenThreshold: 500,
+        hardTokenThreshold: 2000,
         leafSummaryBudget: 300,
       }),
       conversationId,
@@ -129,6 +131,8 @@ describe("compaction engine", () => {
       mockConfig({
         summarizeAfterMessages: 20,
         summarizeAfterTokens: 20000,
+        softTokenThreshold: 100,
+        hardTokenThreshold: 500,
       }),
       conversationId,
     );
@@ -154,7 +158,12 @@ describe("compaction engine", () => {
 
   it("escalation", async () => {
     const { determineCompactionLevel } = await loadCompactionModule();
-    const config = mockConfig({ aggressiveThreshold: 3, maxSummaryDepth: 5 });
+    const config = mockConfig({
+      aggressiveThreshold: 3,
+      maxSummaryDepth: 5,
+      softTokenThreshold: 5000,
+      hardTokenThreshold: 8000,
+    });
 
     const normalConversation = "conv-escalation-normal";
     db.query("INSERT OR IGNORE INTO conversations (id, session_id) VALUES (?, ?)").run(
@@ -206,5 +215,59 @@ describe("compaction engine", () => {
     expect(determineCompactionLevel(db, deterministicConversation, config)).toBe(
       "deterministic",
     );
+  });
+
+  it("respects soft token threshold before compacting", async () => {
+    const conversationId = "conv-soft-threshold";
+    seedTestMessages(db, conversationId, 25);
+
+    const { compact } = await loadCompactionModule();
+    const result = await compact(
+      db,
+      mockConfig({
+        summarizeAfterMessages: 20,
+        summarizeAfterTokens: 999999,
+        softTokenThreshold: 5000,
+        hardTokenThreshold: 8000,
+      }),
+      conversationId,
+    );
+
+    const summaryCount = db
+      .query<{ count: number }, [string]>(
+        "SELECT COUNT(*) AS count FROM summaries WHERE conversation_id = ?",
+      )
+      .get(conversationId)?.count;
+
+    expect(result.summariesCreated).toBe(0);
+    expect(summaryCount).toBe(0);
+  });
+
+  it("uses hard token threshold to switch to aggressive compaction", async () => {
+    const conversationId = "conv-hard-threshold";
+    seedTestMessages(db, conversationId, 25);
+
+    const { compact, determineCompactionLevel } = await loadCompactionModule();
+    const config = mockConfig({
+      summarizeAfterMessages: 999,
+      summarizeAfterTokens: 999999,
+      softTokenThreshold: 500,
+      hardTokenThreshold: 800,
+      leafSummaryBudget: 300,
+    });
+
+    expect(determineCompactionLevel(db, conversationId, config)).toBe("aggressive");
+
+    await compact(db, config, conversationId);
+
+    const summaryLevels = db
+      .query<{ compaction_level: string }, [string]>(
+        "SELECT compaction_level FROM summaries WHERE conversation_id = ? AND depth = 0",
+      )
+      .all(conversationId)
+      .map((row) => row.compaction_level);
+
+    expect(summaryLevels.length).toBeGreaterThan(0);
+    expect(summaryLevels.every((level) => level === "aggressive")).toBeTrue();
   });
 });

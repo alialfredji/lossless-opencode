@@ -256,4 +256,66 @@ describe("assembleContext fresh only", () => {
       messages.reduce((total, message) => total + message.tokenCount, 0),
     );
   });
+
+  it("fresh only: limits fresh tail to the most recent configured messages", () => {
+    const messages = Array.from({ length: 10 }, (_, index) =>
+      insertMessage(
+        db,
+        conversationId,
+        index % 2 === 0 ? "user" : "assistant",
+        `Fresh tail limit message ${index + 1}`,
+      ),
+    );
+
+    const contextItems = assembleContext(
+      db,
+      mockConfig({ maxContextTokens: 15000, freshTailSize: 4 }),
+      conversationId,
+    );
+
+    expect(contextItems).toHaveLength(4);
+    expect(contextItems.map((item) => item.referenceId)).toEqual(
+      messages.slice(-4).map((message) => message.id),
+    );
+  });
+
+  it("fresh only: uses normalized search relevance for matched items and defaults for unmatched fresh tail", () => {
+    const matchedMessage = insertMessage(
+      db,
+      conversationId,
+      "user",
+      "TypeScript pipeline state gets lost during compaction",
+    );
+    const unmatchedMessage = insertMessage(
+      db,
+      conversationId,
+      "assistant",
+      "Different topic about release notes and deployment checklists",
+    );
+
+    createSummary(
+      db,
+      conversationId,
+      1,
+      "TypeScript compaction summary with debugging details",
+      "2024-01-01T10:10:00.000Z",
+    );
+
+    const contextItems = assembleContext(
+      db,
+      mockConfig({ maxContextTokens: 15000, freshTailSize: 4 }),
+      conversationId,
+      "TypeScript compaction",
+    );
+
+    const matchedFreshItem = contextItems.find((item) => item.referenceId === matchedMessage.id);
+    const unmatchedFreshItem = contextItems.find((item) => item.referenceId === unmatchedMessage.id);
+    const summaryItem = contextItems.find((item) => item.type === "summary");
+
+    expect(matchedFreshItem?.relevanceScore).toBeGreaterThan(0.5);
+    expect(unmatchedFreshItem?.relevanceScore).toBe(0.5);
+    expect(summaryItem?.relevanceScore).not.toBeUndefined();
+    expect(summaryItem?.relevanceScore).not.toBe(0.25);
+    expect(summaryItem?.relevanceScore).toBeLessThanOrEqual(1);
+  });
 });

@@ -5,12 +5,44 @@ import {
   getRootSummaries,
   getSummaryTree,
 } from "../summaries/dag-store";
+import { searchAll } from "../search/indexer";
 import type { ContextItem, LcmConfig, Summary, SummaryNode } from "../types";
 import { countTokens } from "../utils/tokens";
 
 interface ContextMessage {
   role: string;
   content: string;
+}
+
+const DEFAULT_SUMMARY_RELEVANCE = 0.25;
+const DEFAULT_MESSAGE_RELEVANCE = 0.5;
+
+function normalizeSearchRanks(
+  db: Database,
+  sessionId: string,
+  query?: string,
+): Map<string, number> {
+  if (!query?.trim()) {
+    return new Map();
+  }
+
+  const results = searchAll(db, sessionId, query, { limit: 100 });
+  if (results.length === 0) {
+    return new Map();
+  }
+
+  const bestRank = results[0]?.rank ?? 0;
+  const worstRank = results[results.length - 1]?.rank ?? bestRank;
+  const rankRange = worstRank - bestRank;
+
+  return new Map(
+    results.map((result) => {
+      const normalized =
+        rankRange === 0 ? 1 : Math.max(0, Math.min(1, (worstRank - result.rank) / rankRange));
+
+      return [`${result.type}:${result.id}`, normalized];
+    }),
+  );
 }
 
 function flattenSummaryTree(nodes: SummaryNode[]): Summary[] {
@@ -81,10 +113,12 @@ export function assembleContext(
   db: Database,
   config: LcmConfig,
   sessionId: string,
+  query?: string,
 ): ContextItem[] {
   const unsummarizedMessages = getUnsummarizedMessages(db, sessionId);
+  const relevanceScores = normalizeSearchRanks(db, sessionId, query);
 
-  let freshTail = unsummarizedMessages.map((message) => ({
+  let freshTail = unsummarizedMessages.slice(-config.freshTailSize).map((message) => ({
     message,
     computedTokenCount: countTokens(message.content),
   }));
@@ -115,7 +149,9 @@ export function assembleContext(
     type: "summary",
     content: summary.content,
     tokenCount: summary.tokenCount,
-    relevanceScore: 1,
+    relevanceScore: query?.trim()
+      ? (relevanceScores.get(`summary:${summary.id}`) ?? DEFAULT_SUMMARY_RELEVANCE)
+      : 1,
     referenceId: summary.id,
     depth: summary.depth,
   }));
@@ -124,7 +160,9 @@ export function assembleContext(
     type: "message",
     content: message.content,
     tokenCount: message.tokenCount,
-    relevanceScore: 1,
+    relevanceScore: query?.trim()
+      ? (relevanceScores.get(`message:${message.id}`) ?? DEFAULT_MESSAGE_RELEVANCE)
+      : 1,
     referenceId: message.id,
     depth: 0,
   }));
