@@ -2,6 +2,7 @@ import type { Hooks } from "@opencode-ai/plugin";
 import { compact } from "./compaction/engine";
 import { assembleContext } from "./context/assembler";
 import { formatContextAsMessages } from "./context/formatter";
+import { LcmError, retryWithBackoff, wrapAsync } from "./errors/handler";
 import { detectLargeContent, extractAndStore } from "./files/large-file-handler";
 import {
   getMessageCount,
@@ -272,22 +273,40 @@ export async function runPipeline(
         continue;
       }
 
-      persistMessage(state.db, state.sessionId, lcmMessage);
+      await wrapAsync(
+        async () => {
+          persistMessage(state.db!, state.sessionId!, lcmMessage);
+        },
+        undefined,
+        "pipeline:persistNewMessages",
+      );
       newlyPersistedMessages.push(lcmMessage);
 
-      if (detectLargeContent(lcmMessage, state.config.largeFileThreshold).isLarge) {
-        const extractedMessage = extractAndStore(
-          state.db,
-          state.sessionId,
-          lcmMessage,
-          state.config.largeFileThreshold,
-        );
-        transformedMessages[index] = withTextContent(message, extractedMessage.content);
-      }
+      await wrapAsync(
+        async () => {
+          if (detectLargeContent(lcmMessage, state.config.largeFileThreshold).isLarge) {
+            const extractedMessage = extractAndStore(
+              state.db!,
+              state.sessionId!,
+              lcmMessage,
+              state.config.largeFileThreshold,
+            );
+            transformedMessages[index] = withTextContent(message, extractedMessage.content);
+          }
+        },
+        undefined,
+        "pipeline:detectAndHandleLargeFiles",
+      );
     }
 
     for (const message of newlyPersistedMessages) {
-      indexMessage(state.db, message.id, message.content, state.sessionId);
+      await wrapAsync(
+        async () => {
+          indexMessage(state.db!, message.id, message.content, state.sessionId!);
+        },
+        undefined,
+        "pipeline:updateFtsIndex",
+      );
     }
 
     const unsummarizedMessages = getUnsummarizedMessages(state.db, state.sessionId);
@@ -306,11 +325,23 @@ export async function runPipeline(
     ) {
       state.isCompacting = true;
 
-      try {
-        await compact(state.db, state.config, state.sessionId);
-      } finally {
-        state.isCompacting = false;
-      }
+      await wrapAsync(
+        async () => {
+          await retryWithBackoff(
+            () => compact(state.db!, state.config, state.sessionId!),
+            {
+              maxRetries: 2,
+              initialDelay: 1000,
+              maxDelay: 5000,
+              retryIf: (err) => err instanceof LcmError && err.recoverable,
+            },
+          );
+        },
+        undefined,
+        "pipeline:compact",
+      );
+
+      state.isCompacting = false;
     }
 
     const rootSummaries = getRootSummaries(state.db, state.sessionId);
