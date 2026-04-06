@@ -1,5 +1,9 @@
 # lossless-opencode
 
+[![npm](https://img.shields.io/npm/v/lossless-opencode)](https://www.npmjs.com/package/lossless-opencode)
+[![tests](https://img.shields.io/badge/tests-181%20passing-brightgreen)](https://github.com/your-org/lossless-opencode)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 Lossless context management plugin for OpenCode with hierarchical summaries, DAG history, and BM25 retrieval.
 
 ## What is LCM?

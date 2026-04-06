@@ -2,7 +2,7 @@ import type { Hooks } from "@opencode-ai/plugin";
 import { compact } from "./compaction/engine";
 import { assembleContext } from "./context/assembler";
 import { formatContextAsMessages } from "./context/formatter";
-import { LcmError, retryWithBackoff, wrapAsync } from "./errors/handler";
+import { handlePipelineError, LcmError, retryWithBackoff, wrapAsync } from "./errors/handler";
 import { detectLargeContent, extractAndStore } from "./files/large-file-handler";
 import {
   getMessageCount,
@@ -266,6 +266,7 @@ export async function runPipeline(
   messages: TransformMessage[],
 ): Promise<TransformMessage[]> {
   const originalMessages = messages;
+  const transformedMessages = [...messages];
 
   try {
     if (!state.db || !state.sessionId) {
@@ -290,7 +291,6 @@ export async function runPipeline(
     const preExistingMessageCount = getMessageCount(state.db, state.sessionId);
     const preExistingSummaries = getRootSummaries(state.db, state.sessionId);
 
-    const transformedMessages = [...messages];
     const newlyPersistedMessages: LcmMessage[] = [];
 
     for (const [index, message] of transformedMessages.entries()) {
@@ -390,8 +390,27 @@ export async function runPipeline(
     });
 
     return toTransformMessages(formattedMessages, transformedMessages, state.sessionId);
-  } catch {
+  } catch (error) {
     state.isCompacting = false;
+
+    const { action } = handlePipelineError(error, "runPipeline", state);
+
+    if (action === "partial") {
+      try {
+        const contextItems = assembleContext(state.db!, state.config, state.sessionId!);
+        const formattedMessages = formatContextAsMessages(contextItems, {
+          totalMessages: getMessageCount(state.db!, state.sessionId!),
+          summariesCount: getSummaryCount(state),
+          dagDepth: getMaxSummaryDepth(state),
+          freshTailSize: contextItems.filter((item) => item.type === "message").length,
+        });
+
+        return toTransformMessages(formattedMessages, transformedMessages, state.sessionId!);
+      } catch {
+        return originalMessages;
+      }
+    }
+
     return originalMessages;
   }
 }

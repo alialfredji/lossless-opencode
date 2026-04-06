@@ -437,6 +437,13 @@ describe("full pipeline e2e", () => {
         ),
       ),
     ).toBe(true);
+
+    const expandTool = runtime.createExpandQueryToolDefinition(state);
+    const expandedMessage = await expandTool.execute({ target: "messages:1-1" }, {} as never);
+
+    expect(expandedMessage).toContain("=== Messages 1-1 ===");
+    expect(expandedMessage).toContain('<file path="src/huge-file.ts">');
+    expect(expandedMessage).toContain("export const massiveValue = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';");
   });
 
   it("recovers cleanly after summarizer failure and succeeds on the next run", async () => {
