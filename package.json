@@ -4,7 +4,8 @@
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "bench": "bun run tests/bench/run.ts"
   },
   "peerDependencies": {
     "@opencode-ai/plugin": "^1.3.2"
