@@ -2,12 +2,18 @@
 
 Lossless context management plugin for OpenCode with hierarchical summaries, DAG history, and BM25 retrieval.
 
+## What is LCM?
+
+LCM stands for Lossless Context Management. Instead of destructively truncating old context, it compresses history into a hierarchy of summaries stored as a DAG at increasing depths while keeping the original data retrievable.
+
+BM25 retrieval keeps relevant prior details accessible, so the model can recover exact context when summaries alone are not enough.
+
 ## Installation
 
-Install dependencies for this plugin project:
+Install the plugin package:
 
 ```bash
-bun install
+bun add lossless-opencode
 ```
 
 Register it in your OpenCode config as a plugin:

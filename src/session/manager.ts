@@ -137,6 +137,7 @@ export function createResetCommand(state: HookSessionState) {
       }
 
       const result = resetSession(state.db, state.sessionId);
+      initSession(state.db, state.sessionId);
       return `LCM session reset. Deleted: ${result.messagesDeleted} messages, ${result.summariesDeleted} summaries, ${result.largeFilesDeleted} large files.`;
     },
   });

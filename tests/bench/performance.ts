@@ -14,6 +14,10 @@ import { createSessionState } from "../../src/index";
 import type { LcmMessage } from "../../src/types";
 import { DEFAULT_CONFIG } from "../../src/types";
 
+declare global {
+  var __lcm_bench_mock: boolean | undefined;
+}
+
 export interface BenchResult {
   name: string;
   min: number;
@@ -385,8 +389,7 @@ async function benchContextAssembly(): Promise<BenchResult> {
 // Benchmark 5: Full Pipeline Latency (mocked LLM)
 async function benchFullPipeline(): Promise<BenchResult> {
   // Mock the AI module to avoid real LLM calls
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (globalThis as any).__lcm_bench_mock = true;
+  globalThis.__lcm_bench_mock = true;
 
   const db = createTestDb();
   const conversationId = crypto.randomUUID();

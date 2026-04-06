@@ -259,6 +259,19 @@ export async function runPipeline(
 
     ensureConversation(state);
 
+    if (state.config.model === "") {
+      const { providerID, modelID } = deriveModelInfo(messages);
+
+      if (
+        providerID !== "" &&
+        modelID !== "" &&
+        providerID !== "lcm" &&
+        modelID !== "lcm"
+      ) {
+        state.config.model = `${providerID}:${modelID}`;
+      }
+    }
+
     const preExistingMessageCount = getMessageCount(state.db, state.sessionId);
     const preExistingSummaries = getRootSummaries(state.db, state.sessionId);
 

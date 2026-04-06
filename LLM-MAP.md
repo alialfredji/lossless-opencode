@@ -45,28 +45,35 @@ src/
   utils/
     tokens.ts
 tests/
+  bench/performance.ts
   bench/run.ts
+  bun-test.d.ts
   e2e/full-pipeline.test.ts
+  fixtures/sample-messages.ts
   helpers/db.ts
-  integration/compacting-hook.test.ts
-  integration/config.test.ts
-  integration/transform-hook.test.ts
-  unit/chunks.test.ts
+  helpers/index.ts
+  helpers/mocks.ts
+  integration/transform.test.ts
+  unit/assembler.test.ts
+  unit/compacting-hook.test.ts
   unit/compaction.test.ts
-  unit/context.test.ts
-  unit/context-formatter.test.ts
-  unit/error-handling.test.ts
+  unit/config.test.ts
+  unit/dag-store.test.ts
+  unit/depth-prompts.test.ts
+  unit/errors.test.ts
+  unit/formatter.test.ts
+  unit/hooks.test.ts
   unit/integrity.test.ts
-  unit/large-file-handler.test.ts
-  unit/lcm-grep.test.ts
+  unit/large-files.test.ts
   unit/messages.test.ts
   unit/search.test.ts
   unit/session.test.ts
-  unit/summary-prompts.test.ts
-  unit/summaries.test.ts
-  unit/token-counting.test.ts
+  unit/setup.test.ts
+  unit/summarizer.test.ts
+  unit/tokens.test.ts
   unit/tools/lcm-describe.test.ts
-  unit/tools/lcm-expand-query.test.ts
+  unit/tools/lcm-expand.test.ts
+  unit/tools/lcm-grep.test.ts
 ```
 
 ## Dependency Graph
