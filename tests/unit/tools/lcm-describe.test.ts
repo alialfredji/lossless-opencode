@@ -157,6 +157,7 @@ describe("createDescribeToolDefinition", () => {
       db: null,
       config: { ...DEFAULT_CONFIG },
       isCompacting: false,
+      compactionCount: 0,
     };
     const def = createDescribeToolDefinition(state);
     const result = await def.execute({}, {} as never);
@@ -170,6 +171,7 @@ describe("createDescribeToolDefinition", () => {
       db,
       config: { ...DEFAULT_CONFIG },
       isCompacting: false,
+      compactionCount: 0,
     };
     const def = createDescribeToolDefinition(state);
     const result = await def.execute({}, {} as never);
@@ -185,6 +187,7 @@ describe("createDescribeToolDefinition", () => {
       db,
       config: { ...DEFAULT_CONFIG },
       isCompacting: false,
+      compactionCount: 0,
     };
     const def = createDescribeToolDefinition(state);
     const result = await def.execute({}, {} as never);

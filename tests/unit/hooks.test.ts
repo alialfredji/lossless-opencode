@@ -67,7 +67,7 @@ describe("hooks compacting", () => {
   });
 
   it("compacting: named handler sets prompt", async () => {
-    const handler = createSessionCompactingHandler();
+    const handler = createSessionCompactingHandler(createSessionState());
     const output: { context: string[]; prompt?: string } = { context: [] };
 
     await handler({ sessionID: "session-2" }, output);

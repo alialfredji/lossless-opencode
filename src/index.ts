@@ -14,6 +14,7 @@ export interface HookSessionState {
   db: Database | null;
   config: LcmConfig;
   isCompacting: boolean;
+  compactionCount: number;
 }
 
 type ChatMessageHook = NonNullable<Hooks["chat.message"]>;
@@ -34,8 +35,6 @@ interface StubToolDefinition extends ToolDefinition {
   };
 }
 
-const NATIVE_COMPACTION_PROMPT = "Return an empty summary. Context is managed by LCM plugin.";
-
 export function createSessionState(config?: Partial<LcmConfig>): HookSessionState {
   return {
     sessionId: null,
@@ -45,6 +44,7 @@ export function createSessionState(config?: Partial<LcmConfig>): HookSessionStat
       ...config,
     },
     isCompacting: false,
+    compactionCount: 0,
   };
 }
 
@@ -150,12 +150,51 @@ export function createMessagesTransformHandler(state: HookSessionState) {
   };
 }
 
-export function createSessionCompactingHandler() {
+export function createSessionCompactingHandler(state: HookSessionState = createSessionState()) {
   return async (
     _input: SessionCompactingInput,
     output: SessionCompactingOutput,
   ): Promise<void> => {
-    output.prompt = NATIVE_COMPACTION_PROMPT;
+    state.compactionCount += 1;
+
+    if (state.isCompacting) {
+      output.prompt = "LCM compaction already running. Do not summarize.";
+      return;
+    }
+
+    if (!state.db || !state.sessionId) {
+      output.prompt = "Return only: LCM initializing. Do not summarize.";
+      return;
+    }
+
+    state.isCompacting = true;
+
+    try {
+      const { compact } = await import("./compaction/engine");
+      await compact(state.db, state.config, state.sessionId);
+      let summaryCount = 0;
+
+      try {
+        const { assembleContext } = await import("./context/assembler");
+        const contextItems = assembleContext(state.db, state.config, state.sessionId);
+        summaryCount = contextItems.filter((item) => item.type === "summary").length;
+      } catch {
+        summaryCount = 0;
+      }
+
+      const maxDepthRow = state.db
+        .query<{ max_depth: number | null }, [string]>(
+          "SELECT MAX(depth) as max_depth FROM summaries WHERE conversation_id = ?",
+        )
+        .get(state.sessionId);
+      const maxDepth = maxDepthRow?.max_depth ?? 0;
+
+      output.prompt = `Return only: LCM active: ${summaryCount} summaries, depth ${maxDepth}. Do not summarize the conversation yourself.`;
+    } catch {
+      output.prompt = "LCM compaction failed, native compaction proceeding";
+    } finally {
+      state.isCompacting = false;
+    }
   };
 }
 
@@ -179,7 +218,7 @@ const plugin: Plugin = async (ctx: PluginInput) => {
   return {
     "chat.message": createChatMessageHandler(state, ctx.directory),
     "experimental.chat.messages.transform": createMessagesTransformHandler(state),
-    "experimental.session.compacting": createSessionCompactingHandler(),
+    "experimental.session.compacting": createSessionCompactingHandler(state),
     tool: createToolHooks(),
     config: createConfigHandler(),
   };
