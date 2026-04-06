@@ -19,16 +19,46 @@ type SummaryResult = {
   outputTokens: number;
 };
 
-function formatMessage(message: LcmMessage): string {
-  return [
-    `Message ID: ${message.id}`,
-    `Role: ${message.role}`,
-    `Timestamp: ${message.timestamp}`,
-    `Sequence: ${message.sequenceNumber}`,
-    `Conversation: ${message.conversationId}`,
-    `Content:`,
-    message.content,
-  ].join("\n");
+export function getPromptForDepth(depth: number, aggressive?: boolean): string {
+  let base: string;
+
+  if (depth === 0) {
+    base =
+      "You are summarizing raw conversation messages. Preserve ALL: technical decisions, file paths, code snippets, error messages, tool usage results. Maintain chronological narrative. This summary is the first compression — nothing else captures this content.";
+  } else if (depth === 1) {
+    base =
+      "You are condensing multiple summaries into a higher-level overview. Each input is already a summary. Focus on: overarching decisions, project trajectory, key outcomes. Individual code snippets can be referenced rather than reproduced. Maintain enough detail that specific events can be located via search tools.";
+  } else {
+    base =
+      "You are creating a high-level project synopsis from condensed summaries. Focus on: major milestones, architectural decisions, current project state, unresolved issues. This is the most compressed view — prioritize what's essential for understanding the project's current state.";
+  }
+
+  if (aggressive === true) {
+    return (
+      base +
+      "\n\nApply aggressive compression. Reduce token count by 40%. Prioritize: decisions > code > discussion. Remove: greetings, acknowledgments, repeated context, verbose explanations."
+    );
+  }
+
+  return base;
+}
+
+export function formatMessagesForSummary(messages: LcmMessage[], depth: number): string {
+  if (depth === 0) {
+    return messages
+      .map((message, index) => {
+        const header = `[#${index + 1} | ${message.role} | ${message.timestamp}]`;
+        return `${header}\n${message.content}`;
+      })
+      .join("\n---\n");
+  }
+
+  return messages
+    .map((message, index) => {
+      const header = `[Summary #${index + 1} | depth]`;
+      return `${header}\n${message.content}`;
+    })
+    .join("\n---\n");
 }
 
 function getMessageTokenCount(message: LcmMessage): number {
@@ -71,35 +101,24 @@ function findBoundaryIndex(messages: LcmMessage[], targetTokens: number, upperBo
 }
 
 export function createSummaryPrompt(messages: LcmMessage[], opts: SummaryOptions): string {
-  const sourceType = opts.depth === 0 ? "raw conversation messages" : "existing summaries that need condensation";
-  const compressionMode = opts.aggressive
-    ? "Aggressive mode is enabled: you may lossy-compress repetitive or low-signal repetition, but preserve unique technical facts."
-    : "Normal mode is enabled: preserve as much technical detail as possible.";
+  const systemPrompt = getPromptForDepth(opts.depth, opts.aggressive ?? false);
+  const formattedBody = formatMessagesForSummary(messages, opts.depth);
 
-  const instructions = [
-    `Summarize these ${sourceType}.`,
+  return [
+    systemPrompt,
+    "",
     "Preserve ALL technical decisions, file paths, code changes, and error messages.",
     "Maintain a chronological narrative from earliest to latest.",
     "Explicitly distinguish what was attempted, what failed, and what ultimately succeeded.",
     "Keep exact function signatures and variable names whenever they appear.",
     "Call out unresolved problems, follow-up work, constraints, and verification results.",
-    compressionMode,
     "Return plain text only.",
-  ];
-
-  const renderedMessages = messages
-    .map((message, index) => [`### Item ${index + 1}`, formatMessage(message)].join("\n"))
-    .join("\n\n");
-
-  return [
-    "You are condensing an engineering conversation without losing critical implementation context.",
-    ...instructions,
     "",
     `Depth: ${opts.depth}`,
     `Items: ${messages.length}`,
     "",
     "Source material:",
-    renderedMessages,
+    formattedBody,
   ].join("\n");
 }
 
