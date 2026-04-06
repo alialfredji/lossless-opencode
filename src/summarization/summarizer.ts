@@ -127,11 +127,12 @@ export async function summarize(
 export async function batchSummarize(
   config: LcmConfig,
   messageBatches: LcmMessage[][],
+  opts: SummaryOptions = { depth: 0 },
 ): Promise<SummaryResult[]> {
   const results: SummaryResult[] = [];
 
   for (const batch of messageBatches) {
-    results.push(await summarize(config, batch, { depth: 0 }));
+    results.push(await summarize(config, batch, opts));
   }
 
   return results;

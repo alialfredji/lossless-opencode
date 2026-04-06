@@ -2,18 +2,19 @@ import { afterEach, describe, expect, it, mock } from "bun:test";
 import { countTokens } from "../../src/utils/tokens";
 import { mockConfig, mockMessage } from "../helpers";
 
+type SummarizerModule = typeof import("../../src/summarization/summarizer");
+
+async function loadSummarizer(tag: string): Promise<SummarizerModule> {
+  return import(`../../src/summarization/summarizer?${tag}`) as Promise<SummarizerModule>;
+}
+
 afterEach(() => {
   mock.restore();
 });
 
-async function loadSummarizerModule() {
-  return import("../../src/summarization/summarizer");
-}
-
 describe("shouldSummarize threshold", () => {
   it("returns false below both thresholds", async () => {
-    const { shouldSummarize } = await loadSummarizerModule();
-
+    const { shouldSummarize } = await loadSummarizer(`should-false-${crypto.randomUUID()}`);
     expect(
       shouldSummarize(19, 19000, {
         summarizeAfterMessages: 20,
@@ -23,8 +24,7 @@ describe("shouldSummarize threshold", () => {
   });
 
   it("returns true when message threshold is reached", async () => {
-    const { shouldSummarize } = await loadSummarizerModule();
-
+    const { shouldSummarize } = await loadSummarizer(`should-msg-${crypto.randomUUID()}`);
     expect(
       shouldSummarize(20, 15000, {
         summarizeAfterMessages: 20,
@@ -34,8 +34,7 @@ describe("shouldSummarize threshold", () => {
   });
 
   it("returns true when token threshold is reached", async () => {
-    const { shouldSummarize } = await loadSummarizerModule();
-
+    const { shouldSummarize } = await loadSummarizer(`should-tok-${crypto.randomUUID()}`);
     expect(
       shouldSummarize(10, 20000, {
         summarizeAfterMessages: 20,
@@ -47,7 +46,7 @@ describe("shouldSummarize threshold", () => {
 
 describe("createSummaryPrompt prompt", () => {
   it("includes all preservation requirements", async () => {
-    const { createSummaryPrompt } = await loadSummarizerModule();
+    const { createSummaryPrompt } = await loadSummarizer(`prompt-${crypto.randomUUID()}`);
     const prompt = createSummaryPrompt(
       [
         mockMessage({ role: "user", content: "Update src/summarization/summarizer.ts and fix error TS2345" }),
@@ -65,8 +64,7 @@ describe("createSummaryPrompt prompt", () => {
 
 describe("splitIntoChunks chunk", () => {
   it("creates chunks within ±10% budget and starts chunks at user messages when possible", async () => {
-    const { splitIntoChunks } = await loadSummarizerModule();
-
+    const { splitIntoChunks } = await loadSummarizer(`chunks-${crypto.randomUUID()}`);
     const messages = [
       mockMessage({ sequenceNumber: 1, role: "user", content: "user boundary alpha ".repeat(55) }),
       mockMessage({ sequenceNumber: 2, role: "assistant", content: "assistant reply alpha ".repeat(40) }),
@@ -119,7 +117,7 @@ describe("summarize and batchSummarize", () => {
       generateText: generateTextMock,
     }));
 
-    const { batchSummarize, summarize } = await loadSummarizerModule();
+    const { batchSummarize, summarize } = await loadSummarizer(`mock-ai-${crypto.randomUUID()}`);
     const config = mockConfig();
     const batchA = [mockMessage({ content: "First batch input" })];
     const batchB = [mockMessage({ content: "Second batch input", sequenceNumber: 2 })];
