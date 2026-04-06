@@ -12,6 +12,7 @@ import { createGrepToolDefinition } from "./tools/lcm-grep";
 import { LcmConfigSchema, type HookSessionState, type LcmConfig, type LcmMessage } from "./types";
 import { countTokens } from "./utils/tokens";
 import { resolve } from "path";
+import { existsSync, renameSync } from "fs";
 
 export type { HookSessionState } from "./types";
 
@@ -42,15 +43,72 @@ function resolveDatabasePath(directory: string, dbPath: string): string {
   return resolve(directory, dbPath);
 }
 
+function isDatabaseCorruption(err: unknown): boolean {
+  if (!(err instanceof Error)) {
+    return false;
+  }
+
+  const code = (err as { code?: string }).code;
+  if (code === "SQLITE_NOTADB" || code === "SQLITE_CORRUPT") {
+    return true;
+  }
+
+  const msg = err.message.toLowerCase();
+  return msg.includes("file is not a database") || msg.includes("database disk image is malformed");
+}
+
+function openDatabase(dbPath: string): Database {
+  const db = createDatabase(dbPath);
+  runMigrations(db);
+  return db;
+}
+
 function getOrCreateDatabase(state: HookSessionState, directory: string): Database {
   if (state.db) {
     return state.db;
   }
 
-  const db = createDatabase(resolveDatabasePath(directory, state.config.dbPath));
-  runMigrations(db);
-  state.db = db;
-  return db;
+  const dbPath = resolveDatabasePath(directory, state.config.dbPath);
+
+  try {
+    state.db = openDatabase(dbPath);
+    return state.db;
+  } catch (err) {
+    if (!isDatabaseCorruption(err) || dbPath === ":memory:" || dbPath.startsWith("file:")) {
+      throw err;
+    }
+
+    const timestamp = Date.now();
+    const backupPath = `${dbPath}.corrupt-${timestamp}`;
+
+    process.stderr.write(
+      `[LCM] Database corrupted, backing up to ${backupPath} and recreating\n`,
+    );
+
+    try {
+      if (existsSync(dbPath)) {
+        renameSync(dbPath, backupPath);
+      }
+
+      const walPath = `${dbPath}-wal`;
+      if (existsSync(walPath)) {
+        renameSync(walPath, `${walPath}.corrupt-${timestamp}`);
+      }
+
+      const shmPath = `${dbPath}-shm`;
+      if (existsSync(shmPath)) {
+        renameSync(shmPath, `${shmPath}.corrupt-${timestamp}`);
+      }
+    } catch (renameErr) {
+      process.stderr.write(
+        `[LCM] Failed to back up corrupt database: ${renameErr instanceof Error ? renameErr.message : String(renameErr)}\n`,
+      );
+      throw err;
+    }
+
+    state.db = openDatabase(dbPath);
+    return state.db;
+  }
 }
 
 function extractMessageContent(parts: ChatMessageOutput["parts"]): string {
