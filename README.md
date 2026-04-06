@@ -1,187 +1,194 @@
 # lossless-opencode
 
-Lossless context management for OpenCode — DAG-based hierarchical summarization that never loses important information.
-
-`bun test` | TypeScript | MIT
-
-## What is LCM?
-
-Lossless Context Management (LCM) addresses the fundamental limitation of fixed context windows in Large Language Models. As conversations grow, native compaction methods often discard older messages or replace them with flat, lossy summaries, leading to the "forgetting" of critical technical decisions, code changes, or error traces.
-
-LCM solves this by using a Directed Acyclic Graph (DAG) of hierarchical summaries. Instead of a single flat summary, LCM maintains a structured history where every piece of information is preserved at some level of abstraction. This ensures that the model always has access to a high-level synopsis of the entire conversation while retaining the ability to "drill down" into specific details when needed.
-
-The key benefit of LCM is that technical context remains intact regardless of conversation length. Decisions made hundreds of messages ago are still reachable through the summary hierarchy or via targeted retrieval tools, preventing the model from hallucinating or repeating past mistakes.
-
-For a deeper theoretical understanding, refer to the original paper: [Lossless Context Management for Agentic AI](https://arxiv.org/abs/2502.14258).
+Lossless context management plugin for OpenCode with hierarchical summaries, DAG history, and BM25 retrieval.
 
 ## Installation
 
-Install the package via bun:
+Install dependencies for this plugin project:
 
 ```bash
-bun add lossless-opencode
+bun install
 ```
 
-Or for local development:
-
-```bash
-bun add file:~/dev/projects/lossless-opencode
-```
-
-To enable the plugin in OpenCode, add it to your `~/.config/opencode/config.json`:
+Register it in your OpenCode config as a plugin:
 
 ```json
 {
-  "plugins": [
-    "lossless-opencode"
+  "plugin": [
+    [
+      "lossless-opencode",
+      {
+        "lcm": {
+          "dataDir": ".lcm"
+        }
+      }
+    ]
   ]
 }
 ```
 
+For local development, point OpenCode at this repository according to your local plugin-loading setup.
+
 ## How It Works
 
-The LCM pipeline ensures that context is managed efficiently without losing data:
+LCM stores every conversation message in SQLite, indexes message and summary text with FTS5/BM25, and compacts older history into a summary DAG instead of a single flat summary.
 
-```
-Messages → Persist to SQLite → Large File Check → FTS Index Update
-    ↓
-Compaction Check → Summarize → DAG Store → Assemble Context → Format XML
-    ↓
-Return to LLM (within token budget)
-```
+High-level flow:
 
-1.  **Persistence**: Every message is immediately stored in a local SQLite database.
-2.  **Large File Check**: Content exceeding the `largeFileThreshold` is offloaded to specialized storage to save context space.
-3.  **FTS Indexing**: Messages and summaries are indexed for fast full-text search.
-4.  **Compaction**: When token limits are reached, the system triggers hierarchical summarization.
-5.  **DAG Store**: Summaries are organized in a DAG, linking them to the original messages they cover.
-6.  **Context Assembly**: The system dynamically selects the most relevant summaries and recent messages to fit the LLM's context window.
+1. Persist incoming messages to SQLite.
+2. Detect oversized content and replace it with a large-file placeholder.
+3. Index messages and summaries for BM25 search.
+4. Summarize unsummarized history once message or token thresholds are crossed.
+5. Condense summaries upward into a DAG as depth grows.
+6. Reassemble context from root summaries, leaf summaries, and the fresh tail under the token budget.
+7. Expose retrieval tools so the model can drill back into exact history when needed.
+
+Core ideas:
+
+- Hierarchical summarization: leaf summaries cover raw messages, deeper summaries condense earlier summaries.
+- DAG history: parent-child summary links preserve structure instead of flattening everything.
+- BM25 retrieval: `lcm_grep` and `lcm_expand_query` recover exact prior details from persisted history.
 
 ## Configuration
 
-Configure LCM by adding an `lcm` object to your OpenCode configuration.
+Configure the plugin under the `lcm` key. Defaults come from `DEFAULT_CONFIG` in `src/types.ts` and are re-exported via `src/config/defaults.ts`.
 
-### Token Limits
-| Option | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `maxContextTokens` | `number` | `120000` | Maximum total tokens allowed in the context window. |
-| `softTokenThreshold` | `number` | `100000` | Threshold to start considering compaction. |
-| `hardTokenThreshold` | `number` | `150000` | Absolute limit where aggressive compaction is forced. |
-| `freshTailSize` | `number` | `64` | Number of recent messages to keep as full text. |
-
-### Compaction & Summarization
-| Option | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `maxLeafSummaryTokens` | `number` | `1200` | Target token count for depth-0 summaries. |
-| `maxCondensedSummaryTokens` | `number` | `2000` | Target token count for higher-level summaries. |
-| `leafSummaryBudget` | `number` | `1200` | Token budget for leaf summaries during assembly. |
-| `condensedSummaryBudget` | `number` | `2000` | Token budget for condensed summaries during assembly. |
-| `maxSummaryDepth` | `number` | `5` | Maximum depth of the summary hierarchy. |
-| `summaryMaxOverageFactor` | `number` | `3` | Allowed multiplier for summary size before splitting. |
-| `compactionBatchSize` | `number` | `10` | Number of messages to process in one compaction step. |
-| `aggressiveThreshold` | `number` | `3` | Depth at which compaction becomes more aggressive. |
-| `summarizeAfterMessages` | `number` | `20` | Trigger summarization after this many new messages. |
-| `summarizeAfterTokens` | `number` | `20000` | Trigger summarization after this many new tokens. |
-| `model` | `string` | `"anthropic:claude-sonnet-4-20250514"` | Model used for generating summaries. |
-
-### Storage & Features
-| Option | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `dataDir` | `string` | `".lcm"` | Directory for storing database and large files. |
-| `dbPath` | `string` | `".lcm/lcm.db"` | Path to the SQLite database file. |
-| `enableIntegrity` | `boolean` | `true` | Enable background integrity checks for the DAG. |
-| `enableFts` | `boolean` | `true` | Enable full-text search indexing. |
-| `largeFileThreshold` | `number` | `50000` | Character limit before a message is treated as a large file. |
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `dataDir` | `string` | `".lcm"` | Runtime directory for SQLite DB and log/output files. |
+| `maxContextTokens` | `number` | `120000` | Global context budget for assembled LCM context. |
+| `softTokenThreshold` | `number` | `100000` | Preferred threshold before compaction pressure increases. |
+| `hardTokenThreshold` | `number` | `150000` | Aggressive threshold before harder compaction behavior. |
+| `freshTailSize` | `number` | `64` | Max recent unsummarized messages kept in full text. |
+| `maxLeafSummaryTokens` | `number` | `1200` | Target size for depth-0 summaries. |
+| `maxCondensedSummaryTokens` | `number` | `2000` | Target size for condensed summaries. |
+| `leafSummaryBudget` | `number` | `1200` | Token budget used when chunking raw messages for summarization. |
+| `condensedSummaryBudget` | `number` | `2000` | Budget used for deterministic truncation / higher-level compaction. |
+| `maxSummaryDepth` | `number` | `5` | Maximum DAG depth before deterministic truncation. |
+| `summaryMaxOverageFactor` | `number` | `3` | Allowed summary overage factor. Present in config shape for tuning. |
+| `compactionBatchSize` | `number` | `10` | Batch size config key exposed by the plugin. |
+| `aggressiveThreshold` | `number` | `3` | Depth at or above which compaction becomes aggressive. |
+| `model` | `string` | `""` | Empty string means derive the model from the active OpenCode session. Non-empty values must look like `provider:model` or `provider/model`. |
+| `enableIntegrity` | `boolean` | `true` | Enables integrity-related config state. |
+| `enableFts` | `boolean` | `true` | Enables full-text-search-related config state. |
+| `largeFileThreshold` | `number` | `50000` | Token threshold for large-file extraction. |
+| `dbPath` | `string` | `".lcm/lcm.db"` | SQLite database path. Relative paths resolve from the plugin config directory. |
+| `summarizeAfterMessages` | `number` | `20` | Trigger summarization after this many unsummarized messages. |
+| `summarizeAfterTokens` | `number` | `20000` | Trigger summarization after this many unsummarized tokens. |
 
 ## Tools
 
 ### `lcm_grep`
-Search the full conversation history (messages and summaries) using BM25 full-text search.
 
-**Arguments:**
-- `query` (string, required): The search terms.
-- `limit` (number, optional): Maximum results to return (default: 10).
-- `type` (enum, optional): What to search (`messages`, `summaries`, or `all`).
+BM25 full-text search across persisted conversation history.
 
-**Example:**
-`lcm_grep(query="database migration error")`
+Args:
+
+- `query: string` required
+- `limit?: number` default `10`
+- `type?: "messages" | "summaries" | "all"` default `"all"`
+
+Examples:
+
+```text
+lcm_grep(query="foreign key failure")
+lcm_grep(query="reset session", type="summaries", limit=5)
+```
 
 ### `lcm_describe`
-Show the current state of the LCM system, including message counts, summary DAG structure, and token budget usage.
 
-**Arguments:** None.
+Shows session state: total messages, fresh tail, summary DAG counts, token budget usage, FTS counts, and compaction level.
 
-**Example:**
-`lcm_describe()`
+Args: none.
+
+Example:
+
+```text
+lcm_describe()
+```
 
 ### `lcm_expand_query`
-Retrieve the full content of a specific summary, message range, or search result.
 
-**Arguments:**
-- `target` (string, required): A summary UUID, a message range (e.g., `messages:10-25`), or a search query.
-- `format` (enum, optional): Output verbosity (`full` or `condensed`).
+Expands a summary, a message range, or a search query into full stored content.
 
-**Example:**
-`lcm_expand_query(target="messages:100-120")`
+Args:
+
+- `target: string` required. Accepts a summary UUID, `messages:N-M`, or a free-text search query.
+- `format?: "full" | "condensed"` default `"full"`
+
+Examples:
+
+```text
+lcm_expand_query(target="messages:10-25")
+lcm_expand_query(target="550e8400-e29b-41d4-a716-446655440000", format="condensed")
+lcm_expand_query(target="migration error")
+```
 
 ## Commands
 
-- `/lcm_new`: Start a fresh session. This generates a new session ID and clears the active history.
-- `/lcm_reset`: Alias for `/lcm_new`. Resets the current session state.
+The plugin registers two session-management commands through the OpenCode tool hook:
+
+- `lcm_new` — generates a new session ID and starts a fresh tracked session.
+- `lcm_reset` — deletes messages, summaries, and large-file records for the current session.
 
 ## Architecture
 
-LCM is built around a modular architecture designed for reliability and performance:
+Module overview:
 
-- **Persistence Layer**: Uses SQLite for robust message and summary storage.
-- **DAG Engine**: Manages the hierarchical relationships between summaries and their source messages.
-- **Compaction Engine**: Determines when and how to summarize based on token pressure.
-- **Context Assembler**: Intelligently selects items from the DAG and fresh tail to construct the LLM prompt.
-
-### The Summary DAG
-The core of LCM is the Directed Acyclic Graph:
-- **Leaf Summaries (Depth 0)**: Direct summaries of a small batch of messages.
-- **Condensed Summaries (Depth 1+)**: Summaries of multiple lower-level summaries.
-- **Root Synopsis**: A high-level overview of the entire conversation.
-
-### Compaction Levels
-1.  **Normal**: Standard hierarchical summarization.
-2.  **Aggressive**: Increased compression ratios when approaching hard limits.
-3.  **Deterministic Truncation**: A safety fallback that removes the oldest summaries if the hard limit is exceeded.
-
-For more details, see the [LCM Paper](https://arxiv.org/abs/2502.14258).
+- `src/index.ts` — plugin entry point, hook wiring, tool registration.
+- `src/pipeline.ts` — main message transform pipeline.
+- `src/messages/persistence.ts` — message persistence and unsummarized-message queries.
+- `src/compaction/engine.ts` — summarization orchestration, condensation, deterministic truncation.
+- `src/context/assembler.ts` — context selection under budget.
+- `src/context/formatter.ts` — XML-style summary and large-file formatting.
+- `src/search/indexer.ts` — FTS5 indexing and BM25 retrieval.
+- `src/summaries/dag-store.ts` — summary storage, edges, and DAG tree reconstruction.
+- `src/files/large-file-handler.ts` — oversized content detection and storage.
+- `src/session/manager.ts` — session lifecycle helpers plus `lcm_new` and `lcm_reset`.
+- `src/db/database.ts` / `src/db/migrations.ts` — SQLite setup and schema.
+- `src/integrity/checker.ts` — integrity checks and repair helpers.
+- `src/summarization/summarizer.ts` — prompt construction, chunking, LLM summarization calls.
+- `src/errors/handler.ts` — retry, fallback, and error logging helpers.
 
 ## Troubleshooting
 
-- **Plugin doesn't activate**: Ensure `lossless-opencode` is correctly added to the `plugins` array in `~/.config/opencode/config.json`.
-- **Native compaction still fires**: If OpenCode's built-in compaction triggers, try increasing `maxContextTokens` or `softTokenThreshold` in your LCM config.
-- **FTS search returns nothing**: Verify that `enableFts` is set to `true` (default). If issues persist, a session reset may be required.
-- **Summaries seem too aggressive**: If summaries lose too much detail, increase `summarizeAfterMessages` or `summarizeAfterTokens` to allow for larger context windows before summarization.
+- Plugin loads but config is ignored: use the `plugin` array with a `lossless-opencode` entry and put settings under `lcm`.
+- Unexpected model validation error: `model` must be empty or match `provider:model` / `provider/model`.
+- `.lcm` keeps showing up in git: add `.lcm/` to `.gitignore` in consuming repos too if needed.
+- Search returns no useful results: confirm the session has persisted history and FTS is enabled in config.
+- Native compaction still happens: LCM sets a high OpenCode token budget, but OpenCode still needs the plugin loaded for custom compaction to run.
+- Session reset fails on old runtime data: delete the local `.lcm/` directory and start a fresh session.
 
 ## Development
 
-Install dependencies:
+Install:
+
 ```bash
 bun install
 ```
 
 Run tests:
+
 ```bash
 bun test
 ```
 
-Type check:
+Run typecheck:
+
 ```bash
 bun run typecheck
 ```
 
-### Project Structure
-- `src/`: Source code (TypeScript).
-- `tests/`: Comprehensive test suite (169 tests).
-- `.lcm/`: Default runtime directory for database and storage.
+Run benchmarks:
 
-## Credits
+```bash
+bun run bench
+```
 
-- **LCM Paper**: "Lossless Context Management for Agentic AI" — Ehrlich & Blackman, Voltropy PBC ([arXiv](https://arxiv.org/abs/2502.14258))
-- **Reference Implementation**: [lossless-claw](https://github.com/martian-engineering/lossless-claw) by Martian Engineering.
-- **OpenCode Plugin SDK**: [@opencode-ai/plugin](https://opencode.ai/docs/plugins).
+There is no separate build step. Bun runs the TypeScript entrypoint directly via `main: "src/index.ts"`.
+
+## Credits/License
+
+- Inspired by the LCM paper: [Lossless Context Management for Agentic AI](https://arxiv.org/abs/2502.14258)
+- Reference implementation inspiration: [lossless-claw](https://github.com/martian-engineering/lossless-claw)
+- License: MIT

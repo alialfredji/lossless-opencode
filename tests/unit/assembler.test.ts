@@ -249,7 +249,7 @@ describe("assembleContext fresh only", () => {
     expect(contextItems.map((item) => item.referenceId)).toEqual(messages.map((message) => message.id));
     expect(transformedMessages).toHaveLength(15);
     expect(transformedMessages[0]).toEqual({
-      role: "assistant",
+      role: "user",
       content: messages[0].content,
     });
     expect(estimateContextTokens(contextItems)).toBe(

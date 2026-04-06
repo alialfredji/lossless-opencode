@@ -8,6 +8,7 @@ import {
   retrieveLargeFileByPath,
   getLargeFileStats,
 } from "../../src/files/large-file-handler";
+import { persistMessage } from "../../src/messages/persistence";
 import type { LcmMessage } from "../../src/types";
 import { countTokens } from "../../src/utils/tokens";
 
@@ -76,6 +77,35 @@ describe("detect and store large content", () => {
     expect(result.content).toContain("[Large file:");
     expect(result.content).toContain("use lcm_expand_query to retrieve");
     expect(result.tokenCount).toBeLessThan(message.tokenCount);
+  });
+
+  it("stores null message_id when message is not persisted yet", () => {
+    const largeContent = makeLargeContent(200);
+    const message = makeMessage(largeContent);
+    const threshold = 100;
+
+    extractAndStore(db, CONVERSATION_ID, message, threshold);
+
+    const row = db
+      .query("SELECT message_id FROM large_files WHERE conversation_id = ?")
+      .get(CONVERSATION_ID) as { message_id: string | null };
+
+    expect(row.message_id).toBeNull();
+  });
+
+  it("stores message_id when message has already been persisted", () => {
+    const largeContent = makeLargeContent(200);
+    const message = makeMessage(largeContent);
+    const threshold = 100;
+
+    persistMessage(db, CONVERSATION_ID, message);
+    extractAndStore(db, CONVERSATION_ID, message, threshold);
+
+    const row = db
+      .query("SELECT message_id FROM large_files WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 1")
+      .get(CONVERSATION_ID) as { message_id: string | null };
+
+    expect(row.message_id).toBe(message.id);
   });
 });
 

@@ -71,6 +71,10 @@ export interface ContextItem {
   relevanceScore: number;
   referenceId: string;
   depth: number;
+  role?: LcmMessage["role"];
+  createdAt?: string;
+  parentIds?: string[];
+  messageIds?: string[];
 }
 
 export interface CompactionResult {

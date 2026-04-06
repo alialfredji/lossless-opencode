@@ -62,6 +62,10 @@ interface LargeFileRow {
   message_id: string | null;
 }
 
+interface MessageExistsRow {
+  found: number;
+}
+
 function rowToLargeFile(row: LargeFileRow): LargeFile {
   return {
     id: row.id,
@@ -93,13 +97,22 @@ export function extractAndStore(
   const placeholder = `[LCM:${fileId}]`;
   const label = part.path ?? "content";
   const replacement = `[Large file: ${label} (${part.tokens} tokens) — use lcm_expand_query to retrieve]`;
+  const messageExists =
+    (
+      db
+        .query<MessageExistsRow, [string]>(
+          "SELECT 1 AS found FROM messages WHERE id = ? LIMIT 1",
+        )
+        .get(message.id)?.found ?? 0
+    ) === 1;
 
-  db.query<void, [string, string, string, string | null, number, string]>(
-    `INSERT INTO large_files (id, conversation_id, placeholder, original_path, token_count, content, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
+  db.query<void, [string, string, string | null, string, string | null, number, string]>(
+    `INSERT INTO large_files (id, conversation_id, message_id, placeholder, original_path, token_count, content, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
   ).run(
     fileId,
     conversationId,
+    messageExists ? message.id : null,
     placeholder,
     part.path ?? null,
     part.tokens,

@@ -120,6 +120,45 @@ describe("persistMessage + getMessages roundtrip", () => {
     expect(part.content).toBe(msg.content);
     expect(part.sequence_number).toBe(1);
   });
+
+  it("roundtrip: multipart messages decompose into message_parts and reconstruct concatenated content", () => {
+    const multipartContent = JSON.stringify([
+      { type: "text", content: "User asked to run the tool" },
+      { type: "tool_use", content: '{"name":"ls","input":"src"}' },
+      { type: "tool_result", content: "src\npackage.json" },
+    ]);
+    const msg = mockMessage({
+      conversationId: CONVERSATION_ID,
+      content: multipartContent,
+      tokenCount: 20,
+    });
+
+    persistMessage(db, CONVERSATION_ID, msg);
+
+    const parts = db
+      .query(
+        "SELECT part_type, content, sequence_number FROM message_parts WHERE message_id = ? ORDER BY sequence_number ASC",
+      )
+      .all(msg.id) as { part_type: string; content: string; sequence_number: number }[];
+
+    expect(parts).toEqual([
+      { part_type: "text", content: "User asked to run the tool", sequence_number: 1 },
+      { part_type: "tool_use", content: '{"name":"ls","input":"src"}', sequence_number: 2 },
+      { part_type: "tool_result", content: "src\npackage.json", sequence_number: 3 },
+    ]);
+
+    const storedMessage = db.query("SELECT content FROM messages WHERE id = ?").get(msg.id) as {
+      content: string;
+    };
+    expect(storedMessage.content).toBe(
+      ['User asked to run the tool', '{"name":"ls","input":"src"}', 'src\npackage.json'].join(
+        "\n\n",
+      ),
+    );
+
+    const [retrieved] = getMessages(db, CONVERSATION_ID);
+    expect(retrieved.content).toBe(storedMessage.content);
+  });
 });
 
 describe("persistMessages atomicity", () => {

@@ -1,187 +1,215 @@
 # LLM Map
 
-## Project Overview
-- Lossless Context Management plugin for OpenCode.
-- Persists conversation history, indexes it with FTS5, compacts older messages into summaries, and rebuilds LLM context under token budgets.
-- Install in OpenCode as a plugin; runtime data lives in `.lcm/` by default.
+## Overview
+- `lossless-opencode` is an OpenCode plugin that persists chat history, compacts it into a summary DAG, and reconstructs bounded context for the model.
+- Runtime data lives in `.lcm/` by default: SQLite database, FTS indexes, and error log output.
+- Plugin entrypoint: `src/index.ts`. Runtime path: package `main` is `src/index.ts`.
 
-## Directory Structure
+## Directory Tree
 ```text
 src/
-  index.ts — Plugin entry point; hook wiring, session state, tool registration
-  pipeline.ts — Message transform pipeline
-  types.ts — Shared TypeScript types, DEFAULT_CONFIG, LcmConfigSchema
+  index.ts
+  pipeline.ts
+  types.ts
   compaction/
-    engine.ts — Compaction orchestration and depth handling
-    index.ts — Re-exports compaction module
+    engine.ts
   config/
-    defaults.ts — Config merge, validation, data-dir resolution
-    index.ts — Re-exports config helpers
+    defaults.ts
   context/
-    assembler.ts — Context selection and prioritization
-    formatter.ts — Context-to-message XML formatting
-    index.ts — Re-exports context helpers
+    assembler.ts
+    formatter.ts
   db/
-    database.ts — SQLite database creation
-    migrations.ts — Schema migrations and FTS setup
-    index.ts — Re-exports db helpers
+    database.ts
+    index.ts
+    migrations.ts
   errors/
-    handler.ts — Error wrappers, retry logic, LcmError
+    handler.ts
   files/
-    large-file-handler.ts — Large content detection and storage
-  hooks/
-    index.ts — Hook helpers and exports
+    large-file-handler.ts
   integrity/
-    checker.ts — Integrity checks and repair reporting
+    checker.ts
   messages/
-    persistence.ts — Message persistence and retrieval
+    persistence.ts
   search/
-    indexer.ts — FTS indexing and search helpers
+    indexer.ts
   session/
-    manager.ts — Session lifecycle management
-  store/
-    index.ts — Store exports
+    manager.ts
   summaries/
-    dag-store.ts — Summary DAG storage and lookup
-    index.ts — Re-exports summary helpers
+    dag-store.ts
   summarization/
-    summarizer.ts — LLM summarization and chunking
-    index.ts — Re-exports summarization helpers
+    summarizer.ts
   tools/
-    lcm-grep.ts — lcm_grep tool definition and search formatter
-    lcm-describe.ts — lcm_describe tool definition and session state formatter
-    lcm-expand-query.ts — lcm_expand_query tool definition and expansion formatter
+    lcm-describe.ts
+    lcm-expand-query.ts
+    lcm-grep.ts
   utils/
-    tokens.ts — Token counting utility
+    tokens.ts
 tests/
-  unit/ — Module-level unit tests
-  integration/ — Hook and pipeline integration tests
-  e2e/ — Full pipeline end-to-end tests
-  bench/ — Performance benchmarks
-  helpers/ — Shared test db and mocks
+  bench/run.ts
+  e2e/full-pipeline.test.ts
+  helpers/db.ts
+  integration/compacting-hook.test.ts
+  integration/config.test.ts
+  integration/transform-hook.test.ts
+  unit/chunks.test.ts
+  unit/compaction.test.ts
+  unit/context.test.ts
+  unit/context-formatter.test.ts
+  unit/error-handling.test.ts
+  unit/integrity.test.ts
+  unit/large-file-handler.test.ts
+  unit/lcm-grep.test.ts
+  unit/messages.test.ts
+  unit/search.test.ts
+  unit/session.test.ts
+  unit/summary-prompts.test.ts
+  unit/summaries.test.ts
+  unit/token-counting.test.ts
+  unit/tools/lcm-describe.test.ts
+  unit/tools/lcm-expand-query.test.ts
 ```
 
-## Module Dependency Graph
+## Dependency Graph
 ```text
-index.ts → pipeline.ts → messages/persistence.ts
-                     → files/large-file-handler.ts
-                     → search/indexer.ts
-                     → compaction/engine.ts → summarization/summarizer.ts
-                                            → summaries/dag-store.ts
-                     → context/assembler.ts
-                     → context/formatter.ts
-                     → errors/handler.ts
-index.ts → tools/lcm-grep.ts → search/indexer.ts
-index.ts → tools/lcm-describe.ts → summaries/dag-store.ts
-index.ts → tools/lcm-expand-query.ts → summaries/dag-store.ts
-index.ts → session/manager.ts
-index.ts → integrity/checker.ts
-All modules → types.ts
-All modules → db/database.ts
+src/index.ts
+  -> src/config/defaults.ts
+  -> src/db/database.ts
+  -> src/db/migrations.ts
+  -> src/messages/persistence.ts
+  -> src/pipeline.ts
+  -> src/session/manager.ts
+  -> src/tools/lcm-describe.ts
+  -> src/tools/lcm-expand-query.ts
+  -> src/tools/lcm-grep.ts
+  -> src/types.ts
+  -> src/utils/tokens.ts
+
+src/pipeline.ts
+  -> src/compaction/engine.ts
+  -> src/context/assembler.ts
+  -> src/context/formatter.ts
+  -> src/errors/handler.ts
+  -> src/files/large-file-handler.ts
+  -> src/messages/persistence.ts
+  -> src/search/indexer.ts
+  -> src/summarization/summarizer.ts
+  -> src/summaries/dag-store.ts
+  -> src/types.ts
+  -> src/utils/tokens.ts
+
+src/compaction/engine.ts -> messages/persistence, summarization/summarizer, summaries/dag-store, types
+src/context/assembler.ts -> messages/persistence, search/indexer, summaries/dag-store, types, utils/tokens
+src/context/formatter.ts -> types
+src/integrity/checker.ts -> context/assembler, search/indexer, types
+src/tools/lcm-grep.ts -> search/indexer, types
+src/tools/lcm-describe.ts -> messages/persistence, compaction/engine, types
+src/tools/lcm-expand-query.ts -> messages/persistence, search/indexer, summaries/dag-store, types
+src/session/manager.ts -> types
+src/config/defaults.ts -> types
+src/db/index.ts -> db/database, db/migrations
 ```
 
-## Key Entry Points
-- `src/index.ts` — default plugin factory returning `Hooks`
-- `src/pipeline.ts` — `runPipeline(state, messages)`
-- `src/compaction/engine.ts` — `compact(db, config, sessionId)`
-- `src/context/assembler.ts` — `assembleContext(db, config, sessionId)`
+## Entry Points
+- `src/index.ts`
+  - default export: plugin factory
+  - `createSessionState(config?)`
+  - `createChatMessageHandler(state, directory)`
+  - `createMessagesTransformHandler(state)`
+  - `createSessionCompactingHandler(state?)`
+  - `createConfigHandler(state)`
+  - `createToolHooks(state)`
+- `src/pipeline.ts`
+  - `runPipeline(state, messages)`
+- `src/db/index.ts`
+  - `createDatabase`, `closeDatabase`, `runMigrations`
 
 ## Data Flow
-```text
-1. OpenCode fires chat.message hook → state.sessionId set
-2. OpenCode fires messages.transform hook
-3. runPipeline(state, messages)
-   a. persistMessage() → messages table
-   b. extractAndStore() → large_files table when needed
-   c. indexMessage() → FTS5 index
-   d. shouldSummarize() → compact() → summarize() → storeSummary() → DAG
-   e. assembleContext() → ContextItem[]
-   f. formatContextAsMessages() → TransformMessage[]
-4. Formatted messages return to OpenCode for LLM input
-```
+1. `chat.message` persists raw messages into `conversations`, `messages`, and `message_parts`.
+2. `experimental.chat.messages.transform` calls `runPipeline()`.
+3. `runPipeline()` persists unseen messages, extracts oversized content into `large_files`, and updates `messages_fts`.
+4. When thresholds are crossed, `compact()` creates depth-0 summaries, then condenses them through parent links in `summary_parents`.
+5. `assembleContext()` selects summaries plus fresh unsummarized messages under `maxContextTokens`.
+6. `formatContextAsMessages()` returns a system preamble plus `<context_summary>` blocks for model consumption.
+7. Retrieval tools query `messages_fts`, `summaries_fts`, stored messages, and DAG links to recover exact history.
 
 ## Type Map
-- `LcmConfig` — Plugin configuration shape
-- `LcmMessage` — Persisted message record
-- `CompactionLevel` — `normal | aggressive | deterministic`
-- `Summary` — Summary DAG node
-- `SummaryNode` — Nested summary tree node
-- `ContextItem` — Assembled context item
-- `CompactionResult` — Compaction output summary
-- `LargeFile` — Offloaded large file record
-- `IntegrityCheck` — Single integrity check result
-- `IntegrityReport` — Aggregated integrity report
-- `IntegrityCheckResult` — Repair-oriented integrity result
-- `SessionState` — Session runtime state
-- `RetrievalResult` — Search result wrapper
+- `src/types.ts`
+  - `LcmConfig`
+  - `HookSessionState`
+  - `LcmMessage`
+  - `CompactionLevel`
+  - `Summary`
+  - `SummaryNode`
+  - `ContextItem`
+  - `CompactionResult`
+  - `LargeFile`
+  - `IntegrityCheck`
+  - `IntegrityReport`
+  - `IntegrityCheckResult`
+  - `SessionState`
+  - `RetrievalResult`
+  - `DEFAULT_CONFIG`
+  - `LcmConfigSchema`
 
-## Config Options
-| Name | Type | Default |
-|---|---:|---:|
-| dataDir | string | `.lcm` |
-| maxContextTokens | number | 120000 |
-| softTokenThreshold | number | 100000 |
-| hardTokenThreshold | number | 150000 |
-| freshTailSize | number | 64 |
-| maxLeafSummaryTokens | number | 1200 |
-| maxCondensedSummaryTokens | number | 2000 |
-| leafSummaryBudget | number | 1200 |
-| condensedSummaryBudget | number | 2000 |
-| maxSummaryDepth | number | 5 |
-| summaryMaxOverageFactor | number | 3 |
-| compactionBatchSize | number | 10 |
-| aggressiveThreshold | number | 3 |
-| model | string | `anthropic:claude-sonnet-4-20250514` |
-| enableIntegrity | boolean | true |
-| enableFts | boolean | true |
-| largeFileThreshold | number | 50000 |
-| dbPath | string | `.lcm/lcm.db` |
-| summarizeAfterMessages | number | 20 |
-| summarizeAfterTokens | number | 20000 |
+## Config Reference
+Source of truth: `src/types.ts` `DEFAULT_CONFIG`, validated/merged in `src/config/defaults.ts`.
 
-## Tool Definitions
-- `lcm_grep`
-  - description: Search persisted conversation history with BM25 FTS over messages and summaries
-  - args:
-    - `query` (string, required)
-    - `limit` (number, optional)
-    - `type` (enum, optional: `messages` | `summaries` | `all`)
-- `lcm_describe`
-  - description: Show current LCM session state
+| Key | Type | Default |
+|---|---|---|
+| `dataDir` | string | `.lcm` |
+| `maxContextTokens` | number | `120000` |
+| `softTokenThreshold` | number | `100000` |
+| `hardTokenThreshold` | number | `150000` |
+| `freshTailSize` | number | `64` |
+| `maxLeafSummaryTokens` | number | `1200` |
+| `maxCondensedSummaryTokens` | number | `2000` |
+| `leafSummaryBudget` | number | `1200` |
+| `condensedSummaryBudget` | number | `2000` |
+| `maxSummaryDepth` | number | `5` |
+| `summaryMaxOverageFactor` | number | `3` |
+| `compactionBatchSize` | number | `10` |
+| `aggressiveThreshold` | number | `3` |
+| `model` | string | `""` |
+| `enableIntegrity` | boolean | `true` |
+| `enableFts` | boolean | `true` |
+| `largeFileThreshold` | number | `50000` |
+| `dbPath` | string | `.lcm/lcm.db` |
+| `summarizeAfterMessages` | number | `20` |
+| `summarizeAfterTokens` | number | `20000` |
+
+## Tool Reference
+- `src/tools/lcm-grep.ts`
+  - name: `lcm_grep`
+  - args: `query: string`, `limit?: number`, `type?: "messages" | "summaries" | "all"`
+  - purpose: BM25 search over messages and/or summaries
+- `src/tools/lcm-describe.ts`
+  - name: `lcm_describe`
   - args: none
-- `lcm_expand_query`
-  - description: Retrieve full content of a summary, message range, or search result
-  - args:
-    - `target` (string, required)
-    - `format` (enum, optional: `full` | `condensed`)
+  - purpose: summarize session state, DAG depth, budgets, FTS counts
+- `src/tools/lcm-expand-query.ts`
+  - name: `lcm_expand_query`
+  - args: `target: string`, `format?: "full" | "condensed"`
+  - purpose: expand summary UUIDs, `messages:N-M`, or free-text search targets
+- `src/session/manager.ts`
+  - command-like tool registrations: `lcm_new`, `lcm_reset`
 
-## Database Schema
-```text
-conversations(id PK, session_id, created_at, archived)
-messages(id PK, conversation_id FK→conversations, role, content, token_count, sequence_number, created_at, UNIQUE(conversation_id, sequence_number))
-message_parts(id PK, message_id FK→messages, part_type, content, sequence_number)
-summaries(id PK, conversation_id FK→conversations, depth, content, token_count, created_at, compaction_level)
-summary_messages(summary_id FK→summaries, message_id FK→messages, PK(summary_id, message_id))
-summary_parents(child_id FK→summaries, parent_id FK→summaries, PK(child_id, parent_id))
-context_items(id PK, conversation_id FK→conversations, item_type, reference_id, depth, position, UNIQUE(conversation_id, position))
-large_files(id PK, conversation_id FK→conversations, message_id FK→messages nullable, placeholder, original_path, token_count, structural_summary, content, created_at)
-lcm_migrations(version PK, applied_at)
-messages_fts FTS5(content) over messages
-summaries_fts FTS5(content) over summaries
-```
+## Schema Reference
+Defined in `src/db/migrations.ts`.
 
-## Testing
-```text
-bun test                     # Run all tests
-bun test tests/unit/         # Unit tests only
-bun test tests/integration/  # Integration tests
-bun test tests/e2e/          # E2E tests
-bun run bench                # Performance benchmarks
-bun run tsc --noEmit         # TypeScript type check
+- `conversations(id, session_id, created_at, archived)`
+- `messages(id, conversation_id, role, content, token_count, sequence_number, created_at)`
+- `message_parts(id, message_id, part_type, content, sequence_number)`
+- `summaries(id, conversation_id, depth, content, token_count, created_at, compaction_level)`
+- `summary_parents(child_id, parent_id)`
+- `summary_messages(summary_id, message_id)`
+- `context_items(id, conversation_id, item_type, reference_id, depth, position)`
+- `large_files(id, conversation_id, message_id, placeholder, original_path, token_count, structural_summary, content, created_at)`
+- `lcm_migrations(version, applied_at)`
+- `messages_fts` and `summaries_fts` FTS5 virtual tables plus insert triggers
 
-tests/unit/         — Module-level unit tests
-tests/integration/  — Hook integration tests
-tests/e2e/          — Full pipeline E2E tests
-tests/bench/        — Performance benchmarks
-tests/helpers/      — Shared test helpers and mocks
-```
+## Testing Reference
+- `bun test` — full test suite
+- `bun test tests/e2e/full-pipeline.test.ts` — end-to-end pipeline coverage
+- `bun run typecheck` — TypeScript verification
+- `bun run bench` — benchmark runner in `tests/bench/run.ts`
+- `tests/helpers/db.ts` provides in-memory SQLite helpers for unit/integration/e2e tests

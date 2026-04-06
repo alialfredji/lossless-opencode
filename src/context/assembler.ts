@@ -154,6 +154,9 @@ export function assembleContext(
       : 1,
     referenceId: summary.id,
     depth: summary.depth,
+    createdAt: summary.createdAt,
+    parentIds: summary.parentIds,
+    messageIds: summary.messageIds,
   }));
 
   const messageItems: ContextItem[] = freshTail.map(({ message }) => ({
@@ -165,6 +168,7 @@ export function assembleContext(
       : 1,
     referenceId: message.id,
     depth: 0,
+    role: message.role,
   }));
 
   return [...summaryItems, ...messageItems];
@@ -172,7 +176,12 @@ export function assembleContext(
 
 export function buildContextMessages(contextItems: ContextItem[]): ContextMessage[] {
   return contextItems.map((contextItem) => ({
-    role: contextItem.type === "system" ? "system" : "assistant",
+    role:
+      contextItem.type === "system"
+        ? "system"
+        : contextItem.type === "message"
+          ? (contextItem.role ?? "assistant")
+          : "assistant",
     content: contextItem.content,
   }));
 }

@@ -260,7 +260,7 @@ describe("full pipeline e2e", () => {
       condensedSummaryBudget: 240,
     });
 
-    const conversation = makeConversation(sessionId, 30);
+    const conversation = makeConversation(sessionId, 100);
     const batches = chunkMessages(conversation, 5);
     let accumulated: TransformMessage[] = [];
     let latestOutput: TransformMessage[] = [];

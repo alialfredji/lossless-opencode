@@ -71,9 +71,9 @@ export function formatContextAsMessages(
           depth: item.depth,
           content: item.content,
           tokenCount: item.tokenCount,
-          createdAt: "",
-          parentIds: [],
-          messageIds: [],
+          createdAt: item.createdAt ?? "",
+          parentIds: item.parentIds ?? [],
+          messageIds: item.messageIds ?? [],
           compactionLevel: "normal",
           conversationId: "",
         }),
@@ -82,7 +82,7 @@ export function formatContextAsMessages(
     }
 
     if (item.type === "message") {
-      messages.push({ role: "assistant", content: item.content });
+      messages.push({ role: item.role ?? "assistant", content: item.content });
     }
   }
 
